@@ -1,4 +1,3 @@
-import logging
 import networkx as nx
 import numpy as np
 import random
@@ -12,7 +11,6 @@ from env.charging_station import ChargingStation
 
 NODE_FEATURE_DIM = 18
 TOTAL_TIME_MASK_THRESHOLD_H = 1.0
-logger = logging.getLogger(__name__)
 
 
 class TrafficPowerEnv:
@@ -124,10 +122,6 @@ class TrafficPowerEnv:
         ev.charge_decision_pending = ev.soc < self.charge_trigger_soc
         ev.low_soc_triggered = ev.soc < self.charge_trigger_soc
         ev.remaining_replans = 1
-        ev.t2_decision_pending = False
-        ev.t2_action = None
-        ev.t2_state = None
-        ev.t2_pending_steps = 0
         ev.abandon_reason = None
 
     def should_request_charge_decision(self, ev):
@@ -156,9 +150,7 @@ class TrafficPowerEnv:
     def get_pending_decisions(self):
         t0_initial = [ev for ev in self.evs if self.should_request_charge_decision(ev)]
         t0_initial.sort(key=lambda ev: ev.soc)
-        t2_arrival = [ev for ev in self.evs if ev.status == "T2_PENDING" and ev.t2_decision_pending]
-        t2_arrival.sort(key=lambda ev: ev.soc)
-        return {"t0_initial": t0_initial, "t2_arrival": t2_arrival}
+        return {"t0_initial": t0_initial, "t2_arrival": []}
 
     def get_completed_evs(self):
         return list(self._completed_evs_this_step)
@@ -166,9 +158,12 @@ class TrafficPowerEnv:
     def get_abandoned_evs(self):
         return list(self._abandoned_evs_this_step)
 
-    def _record_arrival(self, ev, station):
-        ev.t2_step = self.time_step
-        ev.t2_decision_pending = True
+    def _commit_arrival_to_waiting(self, ev, target_station, arrivals_this_step):
+        """到站后直接入队等待（不再经过 t2 accept/reject 决策）。"""
+        target_station.queue.append(ev)
+        ev.status = "WAITING"
+        ev.wait_time_h = 0.0
+        arrivals_this_step[target_station.id] += 1
         self._arrivals_this_step.append(ev)
 
     def _find_ev_by_id(self, ev_id):
@@ -176,27 +171,6 @@ class TrafficPowerEnv:
             if ev.id == ev_id:
                 return ev
         raise ValueError(f"EV {ev_id} not found")
-
-    def apply_t2_action(self, ev_id, action: int):
-        ev = self._find_ev_by_id(ev_id)
-        assert ev.t2_decision_pending, f"EV {ev_id} not in t2_pending state (status={ev.status})"
-        ev.t2_action = action
-        ev.t2_decision_pending = False
-
-        if action == 0:
-            target_station = self.stations[ev.target_station_idx]
-            target_station.queue.append(ev)
-            ev.status = "WAITING"
-            ev.wait_time_h = 0.0
-        elif action == 1:
-            ev.abandon_reason = "manual_reject"
-            self._abandoned_evs_this_step.append({
-                "ev_id": ev.id,
-                "reason": "manual_reject",
-            })
-            self._reset_ev_charging_attempt(ev)
-        else:
-            raise ValueError(f"Invalid t2 action: {action}")
 
     def _find_best_station_metrics(self, ev):
         action_mask = self.get_action_mask(ev)
@@ -246,6 +220,10 @@ class TrafficPowerEnv:
             speed = float(speed_raw)
         except (TypeError, ValueError):
             speed = float(default)
+        # 部分 graphml 把「米/小时」误写入 speed_kph（常见 3.6e4～1.2e5），
+        # 若按 km/h 会算出亚秒级穿边；≥1000 时按 m/h→km/h 折算。
+        if speed >= 1000.0:
+            speed = speed / 1000.0
         return max(1.0, speed)
 
     @staticmethod
@@ -330,7 +308,8 @@ class TrafficPowerEnv:
         return float(self.edge_active_counts.get((u, v), 0) + self.edge_active_counts.get((v, u), 0))
 
     def _bpr_time_h(self, t0_h, x_flow, c_capacity):
-        ratio = max(0.0, float(x_flow)) / max(1.0, float(c_capacity) * self.step_duration_h)
+        capacity_concurrent = max(1.0, float(c_capacity) * float(t0_h))
+        ratio = max(0.0, float(x_flow)) / capacity_concurrent
         return max(1e-6, float(t0_h) * (1.0 + self.bpr_alpha * (ratio ** self.bpr_beta)))
 
     def _dynamic_profiles(self, u, v, add_vehicle=0.0):
@@ -692,12 +671,7 @@ class TrafficPowerEnv:
                                 self._reset_ev_charging_attempt(ev)
                             else:
                                 ev.target_station_idx = target_id
-                                ev.status = "T2_PENDING"
-                                ev.t2_decision_pending = True
-                                ev.t2_state = self.get_graph_state()
-                                ev.t2_pending_steps = 0
-                                arrivals_this_step[target_station.id] += 1
-                                self._record_arrival(ev, target_station)
+                                self._commit_arrival_to_waiting(ev, target_station, arrivals_this_step)
                     except Exception:
                         self._reset_ev_charging_attempt(ev)
                 else:
@@ -732,12 +706,7 @@ class TrafficPowerEnv:
                         ev.just_abandoned_this_step = True
                         self._reset_ev_charging_attempt(ev)
                     else:
-                        ev.status = "T2_PENDING"
-                        ev.t2_decision_pending = True
-                        ev.t2_state = self.get_graph_state()
-                        ev.t2_pending_steps = 0
-                        arrivals_this_step[target_station.id] += 1
-                        self._record_arrival(ev, target_station)
+                        self._commit_arrival_to_waiting(ev, target_station, arrivals_this_step)
 
             elif ev.status == "WAITING":
                 ev.wait_steps += 1
@@ -764,15 +733,6 @@ class TrafficPowerEnv:
             elif ev.status == "CHARGING":
                 ev.charge_steps += 1
                 ev.charge_time_h += self.step_duration_h
-
-            elif ev.status == "T2_PENDING":
-                ev.t2_pending_steps += 1
-
-        pending_t2_evs = [ev for ev in self.evs if ev.status == "T2_PENDING" and ev.t2_decision_pending]
-        for ev in pending_t2_evs:
-            if ev.t2_pending_steps >= 5:
-                logger.warning(f"EV {ev.id} t2 timeout after {ev.t2_pending_steps} steps, auto-accept")
-                self.apply_t2_action(ev.id, 0)
 
         for station in self.stations:
             station.update_arrival_prediction(arrivals_this_step.get(station.id, 0))
@@ -808,7 +768,6 @@ class TrafficPowerEnv:
                     "actual_queue_time_h": getattr(fin_ev, "charge_queue_time_h", fin_ev.wait_time_h),
                     "charging_fee": getattr(fin_ev, "charge_fee_snapshot", fin_ev.total_fee_paid),
                 })
-                fin_ev.t2_decision_pending = False
 
         self.power_grid.run_power_flow(grid_loads)
         voltage_excursion = sum(

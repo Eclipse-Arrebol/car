@@ -198,7 +198,7 @@ class DQNBase:
                 Batch.from_data_list([state_batch[i] for i in t0_idx]).to(self.device),
                 Batch.from_data_list([next_state_batch[i] for i in t0_idx]).to(self.device),
                 action_batch[idx], reward_batch[idx], done_batch[idx],
-                current_type='t0', next_type='t2',
+                current_type='t0', next_type='t0',
             )
             losses.append(loss_t0 * len(t0_idx))
             total_weight += len(t0_idx)

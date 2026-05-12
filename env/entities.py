@@ -43,12 +43,7 @@ class EV:
         self.t0_state = None  # 多步遗留：决策锚点 t0 的状态
         self.t0_action = None  # 多步遗留：t0 时刻动作
         self.t0_step = -1  # 多步遗留：t0 所在步号
-        self.t2_step = -1  # 多步遗留：t2 步号
-        self.t2_decision_pending = False  # 多步遗留：t2 决策是否挂起
         self.travel_time_at_dispatch = 0.0  # 多步遗留：派发决策时累计行驶时间
-        self.t2_action = None  # 多步遗留：t2 动作
-        self.t2_state = None  # 多步遗留：t2 状态
-        self.t2_pending_steps = 0  # 多步遗留：t2 待处理步数
         self.abandon_reason = None  # 放弃充电原因码/说明
 
     def move(self, env, step_hours=1.0):

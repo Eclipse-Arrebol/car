@@ -1,8 +1,8 @@
 # 交接文档 · EV 充电导航项目测试驱动阶段
 
-> **写给下一个 Claude session**
-> 日期：2026-05-12
-> 上一个 session 的工作上下文，请按本文档"接手协议"开始，不要重读项目历史。
+> **写给下一个 Claude session**  
+> **最后更新：2026-05-12**（累计：EMA L1/L2/**L3**、`network` 冒烟、**EMA graphml 限速 m/h 修复**、**环境侧移除 t2 到站决策**、`charging_station` **充满电 snapshot + 会话累计重置 + 路上状态清理**、`pytest` 专项测、Level2 诊断打印）  
+> 接手时请读 **第二节进度** 与 **第十节测试资产**；纪律与协议仍以 **第四节、第三节** 为准。
 
 ---
 
@@ -14,7 +14,7 @@
 
 1. **暂不重构项目代码**
 2. **改走测试驱动路线**：给每个文件写单元测试，在写测试过程中发现并修复 bug
-3. **当前正在第一个文件**：`env/entities.py` 的 EV 类
+3. **单测起点已从 `env/entities.py` 扩展到整条 env 链与部分 agents**（见第十节）
 4. **暂不考虑新创新点**（reroute / 多步 MDP 等想法已经否决，作为未来 v2）
 
 ---
@@ -26,204 +26,174 @@
 | 重构计划 | ❌ 已废弃（不要复活） |
 | t2 多步 MDP 方案 | ❌ 已废弃（不要复活） |
 | 单步 hindsight contextual bandit | ⏸️ 暂缓（等测试完成后再说） |
-| `tests/test_entities.py` Cursor 提示词 | ✅ 上一个 session 已发给用户 |
-| Cursor 是否已执行提示词 | ❓ 未知，待用户回复 |
-| git 备份状态 | ⚠️ 未确认（上一个 session 让用户做但没拿到 git log 回执） |
-
-**最近一次给用户的输出**：`test_entities.py` 的 Cursor 两阶段提示词。
-- Step 1: 读源码列字段
-- Step 2: 写测试计划（停下来给用户审）
-- Step 3: 写代码 + 跑测试
-
-用户下一步可能的动作：把 Cursor 跑出来的 Step 2 计划贴回来。
+| `tests/test_entities.py`（EV + mock 路网） | ✅ 已落地（含 `remaining_edge_time_h`） |
+| `tests/test_charging_station.py` | ✅ 已落地 |
+| `tests/test_power_grid_pp.py`（`compute_thevenin=False`） | ✅ 已落地 |
+| `tests/test_base_env.py`（决策/BPR/解析等可隔离逻辑） | ✅ 已落地 |
+| `tests/test_real_env.py`（offline 合成路网） | ✅ 已落地 |
+| `tests/test_real_env_ema_graph_integration.py`（层级 1：T1.1–T1.4） | ✅ 已落地，路网路径 `map_outputs/ema/ema.graphml` |
+| `tests/test_real_env_ema_level2_physics.py`（层级 2：T2.1–T2.7） | ✅ 已落地；用例末 **`_diag_print`** 打关键统计（T2.7 abandon 上界已随「无 T2_PENDING」放宽） |
+| `tests/test_real_env_ema_level3_performance.py`（层级 3：T3.1–T3.3 耗时 / cProfile / 内存） | ✅ 已落地；**T3.3** 依赖 **psutil**，未装则 skip |
+| `tests/test_snapshot_bug.py`（充满后 **会话** 累计字段 + snapshot 语义） | ✅ 已落地（`pytest`） |
+| `tests/test_respawn_state_cleanup.py`（充满后 **path/边/目标站** 等路上状态清空） | ✅ 已落地（`pytest`） |
+| `tests/test_network.py`（FeatureEncoder / GraphQNetwork 冒烟） | ✅ 已落地 |
+| **`agents/dqn_base.py`** | ⬜ **下一个优先单测文件** |
+| `agents/FederatedDQN.py` | ⬜ 待定 |
+| `training/trainer.py` | ⬜ 待定 |
+| git 备份 | ⚠️ 仍建议用户每步 `git commit`（历史状态未强制核验） |
 
 ---
 
 ## 三、接手协议（看完这一节就能开工）
 
-### 如果用户贴了 Cursor 的 Step 2 测试计划
+### 若继续「按文件写单测」
 
-按这 3 件事审：
+1. **EV 上 `t0_*` / `abandon_*` 等多步遗留字段**：写测时不必当核心契约；**`t2_*` 已从 `entities.EV` 删除**，环境已无 **`T2_PENDING` / `apply_t2_action`**（见第五节）。
+2. **单文件 4–7 个用例**为宜；集成/EMA 层级可单独文件、单独命名（`test_real_env_ema_*`）。
+3. **测试 FAILED**：先贴 traceback，区分「断言/场景写错」与「实现 bug」；**禁止**为绿而盲改断言或盲改实现（纪律见第四节）。
 
-1. **测试计划有没有把 t2 相关字段当正常字段测**
-   - EV 类上有 11 个 t2 遗留字段（详见下方"已知的代码现状"）
-   - 这些字段是死代码，不应该花测试覆盖它们
-   - 如果 Cursor 的计划里有 `test_t2_state` 之类的，告诉用户砍掉
+### 若用户说「继续测试」
 
-2. **测试计划暴露的设计 smell 是不是真实问题**
-   - Cursor 在 Step 2 应该列出"写测试时注意到的问题"
-   - 这才是测试驱动的真正价值——比测试本身更重要
-   - 看到 smell 不要立刻让用户改，先记下来，等更多测试暴露同类问题再判断
-
-3. **测试数量是否合理**
-   - 标准是 4-6 个测试
-   - 超过 7 个 → 砍
-   - 少于 3 个 → 让 Cursor 补
-   - 1 个测试函数 > 20 行 → 拆
-
-审完说"开始写"，让用户让 Cursor 进 Step 3。
-
-### 如果用户贴了 Cursor 跑出来的测试结果
-
-- **测试有 FAILED**：traceback 是最有价值的产出。诊断是"测试写错"还是"entities.py 有 bug"。**绝对不能让 Cursor 自己 fix**——它会改测试让通过，掩盖真实问题。
-- **测试全 PASSED**：检查覆盖是否真实，会不会是 mock 太重导致"假绿"。检查完进入下一个文件 `env/charging_station.py`。
-
-### 如果用户问"下一步怎么走"
-
-按这个顺序推进测试（来自上一个 session 的规划）：
+下一文件顺序（与早前规划一致，已从 `entities` 推进到 `network` 之后）：
 
 ```
-1. env/entities.py        ← 当前在这里
-2. env/charging_station.py
-3. env/power_grid_pp.py
-4. env/base_env.py
-5. env/real_env.py
-6. agents/network.py
-7. agents/dqn_base.py
-8. agents/FederatedDQN.py
-9. training/trainer.py
+… 已完成：entities → charging_station → power_grid_pp → base_env → real_env(offline) → EMA L1/L2/**L3** → agents/network.py → **charging_station 充满语义 pytest**
+→ 当前：agents/dqn_base.py
+→ 其后：agents/FederatedDQN.py → training/trainer.py
 ```
-
-每个文件 3-5 个测试就够，不追求覆盖率。
 
 ---
 
 ## 四、必须遵守的工作纪律（这是 5 轮失控的教训）
 
-这一节是最重要的。**违反任何一条都会让用户再次失控。**
+### 纪律 1：Cursor 一次只动一个文件（单测文件可新增，但实现 bug 先记 TODO 再扩 scope）
 
-### 纪律 1：Cursor 一次只动一个文件
+若写测时发现**非当前目标文件**的明显 bug，**记下来**，可让用户记在 `TESTING_TODO.md`，**不主动大改**。
 
-如果 Cursor 在写 `test_entities.py` 时发现 `charging_station.py` 有问题，**记下来不要追**。
-让用户在 `TESTING_TODO.md` 里写一笔，继续当前文件。
+### 纪律 2：测试 FAILED 时，不许为绿而糊弄
 
-### 纪律 2：测试 FAILED 时，不许 Cursor 自己改
-
-让 Cursor 停下来报告 traceback。
-**严禁三件事**：
-- 改 entities.py 让测试过
-- 改测试让通过
-- "顺手"重构
+让 Cursor **停下来**报告 traceback。严禁：改实现糊弄通过、改断言糊弄通过、「顺手」大重构。
 
 ### 纪律 3：每天 commit 一次
 
-用户的 git 状态可能还很乱（5 轮失控后没 commit 历史）。
-任何时候用户说"我做完一步了"，提醒一句："git commit 一下"。
+用户完成一步后提醒：`git commit`。
 
 ### 纪律 4：不要替用户做决定
 
-用户已经踩过坑，比上一个 session 更知道自己想要什么。
-**多用 `ask_user_input_v0` 工具，少自作主张**。
-
-特别是这两类绝对不要替用户决定：
-- 测试覆盖多深
-- 测试发现的 bug 现在修还是延后
+测试深度、bug 是否当场修，**问用户**。
 
 ### 纪律 5：不要碰废弃方案
 
-如果用户聊着聊着提到 t2 / 多步 MDP / reroute，**只回应不展开**。
-不要写"我们之前讨论过…"。不要复盘历史。
+用户提到 t2 / 多步 MDP / reroute：**简短回应即可，不展开、不复盘**。
 
 ---
 
-## 五、已知的代码现状（上一个 session 从用户处拿到的事实）
+## 五、已知的代码现状（事实摘要）
 
-### env/entities.py 的 EV 类
+### `env/entities.py` 的 EV 类
 
-**字段总数 30+**，其中以下 **11 个是 t2 多步遗留死字段**，写测试时不需要覆盖：
+**已从类中删除**：原 `t2_step`, `t2_decision_pending`, `t2_action`, `t2_state`, `t2_pending_steps`（环境不再做 t2 到站决策）。
 
-```
-t0_state, t0_action, t0_step, t2_step,
-t2_decision_pending, travel_time_at_dispatch,
-t2_action, t2_state, t2_pending_steps,
-abandon_reason, just_abandoned_this_step
-```
+**仍存在的多步 / 遗留字段**（写测不必当核心契约）：`t0_state`, `t0_action`, `t0_step`, `travel_time_at_dispatch`, `abandon_reason`, `just_abandoned_this_step` 等。
 
-**核心活字段**（hindsight reward 需要）：
+**核心活字段**（统计）：`travel_time_h`, `wait_time_h`, `total_fee_paid`, `total_energy_charged`, `charge_sessions` 等。注意 **`travel_steps` / `wait_steps` / `charge_steps`** 在 `base_env.step` 里**按状态每步 +1**，**充满电时未重置**（全寿命计数语义）；是否会话化待单独任务。
 
-```
-travel_time_h        # 累计行驶时间
-wait_time_h          # 累计排队时间
-total_fee_paid       # 累计费用
-charge_sessions      # 完成的充电次数
-```
+### `env/charging_station.py` 充满电分支（`ev.soc >= 95.0`，字面常量）
 
-⚠️ **关键事实**：EV 上还有一套 charging_station 写入的 **snapshot 字段**：
+1. **先**把当前累计写入 snapshot：`charge_fee_snapshot` / `charge_queue_time_h` / `charge_travel_time_h`（值为写入瞬间的 `total_fee_paid` / `wait_time_h` / `travel_time_h`）。  
+2. **再**将会话内累计 **`travel_time_h`, `wait_time_h`, `total_fee_paid`, `total_energy_charged` 置 0**（语义改为「本次充电会话内累计」，避免第二次充满 snapshot 混入第一次）。  
+3. **再**清空路上状态：`path`, `last_traversed_nodes`, `current_edge_*`, `remaining_edge_time_h`, `target_station_idx`, `assigned_station` 等与 `EV.__init__` 空闲语义对齐。  
+4. 然后 `status = "IDLE"`、`charge_sessions += 1`、flags、`respawn_after_full_charge` 随机 SOC 等（与原先一致）。
 
-```
-charge_fee_snapshot       # 这次充电的费用快照
-charge_queue_time_h       # 这次充电的排队时长
-charge_travel_time_h      # 这次充电的行驶时长
-```
+### `env/base_env.py` 与 **EMA graphml 限速**
 
-**两套字段的语义还没完全查清**，上一个 session 设计了 Cursor 调查提示词但**用户没用**，直接跳到测试路线。**reward 函数到底读哪一套是悬而未决的问题**——不要在这里替用户做决定。
+- **`TrafficPowerEnv._parse_speed_kph`**：若数值 **`>= 1000`**，按 **m/h→km/h** 除以 1000（修复 graphml 把米/小时误标为 `speed_kph` 导致 **亚秒级穿边**）。单测见 `tests/test_base_env.py` 中 `test_parse_speed_graphml_m_per_h_mislabeled_as_kph`。
+- **环境侧已无 t2 决策**：到站即 **`_commit_arrival_to_waiting`**（入队 `WAITING`）；已删 **`apply_t2_action`**、**`T2_PENDING`** 及超时 auto-accept 日志；**`get_pending_decisions`** 的 **`t2_arrival` 恒为 `[]`**；**`info["pending_t2"]`** 仍为「本步到站入队 EV」列表（telemetry），**非**待决策队列。
+- **`training/trainer.py`**：`pending_t2` 环已删；`T0` 的 `backfill_snext` 在 **`env.step` 之后**用 `get_graph_state_for_ev` 立即填上。
+- **`agents/dqn_base.py`**：混合 `step_type` 时 **T0 的 `next_type`** 从 **`'t2'`** 改为 **`'t0'`**（新轨迹无 T2）；回放缓冲里旧 **T2** 样本仍可被旧分支吃到。
+- `real_env`：不调用 `TrafficPowerEnv.__init__()`，自成初始化（已知隐患，HANDOFF 不要求在此修）。
+- **`agents/network.py`**：仍含 **`t2_advantage_fc`** 与 **`action_type='t2'`**（单测 `test_network` 仍覆盖）；与「环境无 t2」可并存，属 **RL 网络遗留**。
+- 旧脚本 `tests/step*.py` 等：将来可迁到 `tests/experiments/`，**非当前任务**。
 
-### 其他文件的关键事实
+### 用户环境（补充）
 
-- `env/base_env.py`: 多步遗留方法 `apply_t2_action`, `get_pending_decisions` 还在，需要在 base_env 测试时再处理
-- `env/real_env.py`: 没调用 `super().__init__()`，自成一套初始化（隐患但不修）
-- `agents/FederatedDQN.py`: 含 `trajectory_buffer` 字典等多步遗留结构
-- `agents/network.py`: 含 `t2_advantage_fc` 双 head 结构遗留
-- 所有 `tests/` 下旧脚本（step5-step17）将来要移到 `tests/experiments/`，**但不是现在**
-
-### 用户的工作环境
-
-- 系统：Windows，路径 `d:\car_charge`
-- 工具：Cursor（主力 AI 编辑器）
-- 网络：国内，PyPI 可能慢，已配置 Clash + 镜像源
-- git 状态：上一个 session 已要求做备份 commit，但没拿到 `git log` 回执确认
+- 工作区常见为 **`G:\car_charge\car_charge`**（与文档旧载 `d:\car_charge` 可能不一致，以实际打开路径为准）。
+- Windows 下 **`osm_loader` 会 print 中文**；EMA 相关测试文件内已对 `stdout/stderr` 做 **UTF-8 reconfigure**，避免 `cp1252` 控制台编码错误。
 
 ---
 
-## 六、用户性格 / 协作风格
+## 六、用户性格 / 协作风格（保留）
 
-来自记忆和当前对话的观察：
-
-1. **偏好直接结论 + 可执行步骤**，不喜欢长篇解释
-2. **多用 `ask_user_input_v0` 给选项**比文字问"你想怎么办"效率高 3 倍
-3. **会自己改主意**——比如这次本来计划重构，聊着聊着改成测试驱动。**接受这一点，不要劝他回去**
-4. **比上一个 session 的他更冷静**——他已经知道前面失控的根本原因（让 Codex 自由发挥），现在会主动控制 Cursor 的自由度
-5. **偶尔会冒出"创新点"想法**（如这次的"每节点决策"）——认真分析，但**优先用时间预算和风险评估劝退**，除非他坚持
+1. 偏好**直接结论 + 可执行步骤**  
+2. 选项化提问比开放式提问更高效  
+3. 会调整方向（如测试驱动）——**接受，不劝回**  
+4. 控制 Cursor 自由度，避免「一把梭」改代码  
 
 ---
 
-## 七、上一个 session 没解决但用户暂时不关心的问题
+## 七、暂时不要主动展开的话题（保留）
 
-记下来供未来需要时拿出，**不要主动提**：
-
-1. **reward 读 A 套还是 B 套字段**（charging_station 写入语义未查清）
-2. **`should_request_charge_decision` 跟 `get_pending_decisions` 的关系**（语义可能重叠）
-3. **`real_env.py` 不继承 `__init__` 的隐患**
-4. **agents/network.py 的 t2_advantage_fc 双 head 结构清理**
-5. **训练入口 step15_run / step17_run 等历史脚本归档**
+1. **全管线 reward** 是否仍有一处读累计、一处读 snapshot（**充电完成路径**已在桩侧对齐「先 snapshot 再清零累计」）  
+2. `should_request_charge_decision` 与 `get_pending_decisions`（**`t2_arrival` 已空**）的命名/文档是否仍易误导  
+3. `real_env` 与基类 `__init__` 不一致的长期隐患  
+4. `t2_advantage_fc` 是否删除/收敛  
+5. 历史训练脚本归档  
 
 ---
 
-## 八、下一个 session 的"开场动作建议"
+## 八、下一个 session 的开场建议（已更新）
 
-如果用户上来说"继续"或没说清楚，按这个顺序问：
+若用户只说「继续」或「继续测试」：
 
-1. 上次让 Cursor 跑 test_entities 的 Step 2 计划，跑出来了吗？
-2. 如果跑出来了，把计划贴给我审
-3. 如果还没跑，问他是不是要重新生成提示词
+1. 下一优先文件：**`agents/dqn_base.py`**（写 4–7 条可隔离单测或冒烟）。  
+2. **推荐全量**：**`python -m pytest tests/ -v`**（仓库已用 `pytest`：`test_snapshot_bug`、`test_respawn_state_cleanup` 等；EMA 仍依赖 **`map_outputs/ema/ema.graphml`** + **osmnx**；**~1–2 分钟**级）。  
+3. **unittest 全量**（可选）：**`python -m unittest discover -s tests -p "test_*.py" -v`**（会收集 `pytest` 风格文件时行为因版本而异，**优先 pytest**）。  
+4. **EMA 分层单独跑**：  
+   - L1：`python -m pytest tests/test_real_env_ema_graph_integration.py -v -s`  
+   - L2：`python -m pytest tests/test_real_env_ema_level2_physics.py -v -s`（可加 **`python -u`** 看 `_diag_print`）  
+   - L3：`python -m pytest tests/test_real_env_ema_level3_performance.py -v -s`（**T3.3** 要 **psutil**）  
+5. 专项：`python -m pytest tests/test_snapshot_bug.py tests/test_respawn_state_cleanup.py -v`
 
-**不要**主动复盘前面的讨论。
-**不要**主动建议改方案。
-**不要**主动写代码。
-
-等用户给你具体输入再行动。
+**不要**在未拿到 traceback 时替用户「猜着改」失败用例。
 
 ---
 
-## 九、最后一句话
+## 九、最后一句话（保留）
 
-这个项目的核心问题从来不是技术，是**自由度控制**。
+项目的核心风险之一是**自由度失控**。测试驱动要赢：**读源码 → 计划 →（用户确认）→ 写测 → 报告**，**不许跳步**。
 
-上一个 session 学到的东西：
-- 多步 MDP 失败 ≠ 多步 MDP 错，是 Codex 自由发挥失败
-- 重构计划失败 ≠ 重构错，是没 git 备份就动手失败
-- 单步 hindsight 也不一定成功，如果让 Cursor 自由调 reward 同样会失败
+---
 
-**测试驱动这条路成功的唯一条件**：Cursor 严格按"读源码 → 给计划 → 等审核 → 写测试 → 报告结果"的两阶段流程，**任何一步都不许跳**。
+## 十、本会话落地的测试资产（便于索引）
 
-如果你看到 Cursor 跳步，立刻让用户打断。这是你接手后最重要的工作。
+| 文件 | 内容提要 |
+|------|-----------|
+| `tests/test_entities.py` | `EV` 初始化、`move`、SOC 钳制、`remaining_edge_time_h` |
+| `tests/test_charging_station.py` | 电价、`optimize_power` 限幅、`step` 出队等 |
+| `tests/test_power_grid_pp.py` | `PPPowerGrid33` 解析母线、潮流、`optimize_power` 透传 |
+| `tests/test_base_env.py` | `should_request_charge_decision`、`_find_ev_by_id`、静态解析、`_bpr_time_h` |
+| `tests/test_real_env.py` | `offline=True` 合成路网 + `reset`/`step({})` |
+| `tests/test_real_env_ema_graph_integration.py` | **层级 1**：T1.1 路网、T1.2 `reset`（50 EV）、T1.3 单步、`T1.4` 50 步；合法状态**无** `T2_PENDING` |
+| `tests/test_real_env_ema_level2_physics.py` | **层级 2**：T2.1–T2.7 + 诊断输出 |
+| `tests/test_real_env_ema_level3_performance.py` | **层级 3**：T3.1 单步耗时、T3.2 cProfile top15、T3.3 RSS（psutil） |
+| `tests/test_snapshot_bug.py` | 充满后 **snapshot = 当次会话累计**；**`total_fee_paid` 等与 snapshot 写入后清零** |
+| `tests/test_respawn_state_cleanup.py` | 充满后 **path / 边状态 / target_station_idx / assigned_station** 等清零 |
+| `tests/test_network.py` | `FeatureEncoder`、`GraphQNetwork`（`t0`/`t2`、mask、非法 `action_type`） |
+
+**统一运行（推荐）**：
+
+```bash
+python -m pytest tests/ -v
+```
+
+**仅 unittest + 旧列表**（不含 `pytest` 独占文件时勿单独依赖）：
+
+```bash
+python -m unittest tests.test_entities tests.test_charging_station tests.test_power_grid_pp tests.test_base_env tests.test_real_env tests.test_real_env_ema_graph_integration tests.test_real_env_ema_level2_physics tests.test_real_env_ema_level3_performance tests.test_network -v
+```
+
+---
+
+## 十一、`env/entities.py` 行尾注释
+
+`EV.__init__` 各字段有**中文行尾注释**（便于读源码写测）。**`t2_*` 已从类中删除**；第五节以当前代码为准。
