@@ -14,11 +14,15 @@
 """
 
 import copy
+import logging
+import numpy as np
 import torch
 from collections import OrderedDict
 
-from agents.dqn_base import DQNBase
+from agents.dqn_base import DQNBase, _clone_data_to_cpu
 from agents.network import GraphQNetwork
+
+logger = logging.getLogger(__name__)
 
 try:
     from opacus.accountants import RDPAccountant
@@ -42,7 +46,7 @@ class FederatedClient(DQNBase):
 
     def __init__(self, client_id, num_features, num_actions,
                  station_node_ids=None, num_nodes_per_graph=9,
-                 lr=0.0003, memory_size=20000, proximal_mu=1e-4,
+                 lr=0.0003, memory_size=10000, proximal_mu=1e-4,
                  use_dp=False, dp_noise_multiplier=1.0, dp_clip_C=1.0,
                  dp_delta=1e-5, dp_sample_rate=0.01):
         super().__init__(
@@ -72,6 +76,10 @@ class FederatedClient(DQNBase):
         self.local_train_call_count = 0
         self.verbose = False
 
+        # 多步 MDP 轨迹暂存
+        self.trajectory_buffer = {}  # key: (ev_id, session_id), value: list of transition dicts
+        self._trajectory_log = []    # 已 flush 的轨迹记录（用于调试/测试）
+
     # ------------------------------------------------------------------
     # 覆盖：经验存储时顺带计数（供 FedAvg 加权）
     # ------------------------------------------------------------------
@@ -79,6 +87,88 @@ class FederatedClient(DQNBase):
     def store_transition(self, state, action, reward, next_state, action_mask=None):
         super().store_transition(state, action, reward, next_state, action_mask)
         self.num_samples_this_round += 1
+
+    # ------------------------------------------------------------------
+    # 多步 MDP 轨迹管理
+    # ------------------------------------------------------------------
+
+    def _make_zero_state(self, s):
+        if hasattr(s, 'x'):
+            from torch_geometric.data import Data as PyGData
+            return PyGData(
+                x=torch.zeros_like(s.x),
+                edge_index=s.edge_index.clone(),
+                edge_attr=s.edge_attr.clone() if s.edge_attr is not None else None,
+            )
+        return np.zeros_like(s)
+
+    def store_step(self, ev_id, session_id, s, a, r, step_type):
+        key = (ev_id, session_id)
+        if key not in self.trajectory_buffer:
+            self.trajectory_buffer[key] = []
+        s_cpu = _clone_data_to_cpu(s) if hasattr(s, 'clone') else s
+        self.trajectory_buffer[key].append({
+            's': s_cpu,
+            'a': int(a),
+            'r': float(r),
+            's_next': None,
+            'done': False,
+            'step_type': step_type,
+        })
+
+    def backfill_snext(self, ev_id, session_id, s_next):
+        key = (ev_id, session_id)
+        if key in self.trajectory_buffer and len(self.trajectory_buffer[key]) > 0:
+            s_cpu = _clone_data_to_cpu(s_next) if hasattr(s_next, 'clone') else s_next
+            self.trajectory_buffer[key][-1]['s_next'] = s_cpu
+
+    def add_reward(self, ev_id, session_id, delta_r):
+        key = (ev_id, session_id)
+        if key in self.trajectory_buffer and len(self.trajectory_buffer[key]) > 0:
+            self.trajectory_buffer[key][-1]['r'] += float(delta_r)
+
+    def flush_trajectory(self, ev_id, session_id, abandon=False, terminal=True):
+        key = (ev_id, session_id)
+        traj = self.trajectory_buffer.pop(key, [])
+        if not traj:
+            return
+
+        if abandon:
+            traj[0]['r'] += -50.0
+            traj[0]['done'] = True
+            traj[0]['s_next'] = self._make_zero_state(traj[0]['s'])
+            traj = traj[:1]
+        elif terminal:
+            traj[-1]['done'] = True
+            traj[-1]['s_next'] = self._make_zero_state(traj[-1]['s'])
+        else:
+            traj[-1]['done'] = False
+
+        for t in traj:
+            if t['s_next'] is None:
+                logger.warning(f"flush_trajectory: {key} step={t['step_type']} s_next is None, fallback to zeros+done")
+                t['s_next'] = self._make_zero_state(t['s'])
+                t['done'] = True
+
+        for t in traj:
+            self.memory.append((t['s'], t['a'], t['r'], t['s_next'], None, t['done'], t['step_type']))
+            self.num_samples_this_round += 1
+
+        if not hasattr(self, '_trajectory_log'):
+            self._trajectory_log = []
+        self._trajectory_log.append({
+            'ev_id': ev_id,
+            'session_id': session_id,
+            'abandon': abandon,
+            'steps': [(t['step_type'], t['a'], t['r'], t['done']) for t in traj],
+        })
+
+    def flush_all_pending(self):
+        pending_keys = list(self.trajectory_buffer.keys())
+        if pending_keys:
+            logger.info(f"flush_all_pending: discarding {len(pending_keys)} unfinished trajectories at episode boundary (no abandon penalty applied)")
+        for key in pending_keys:
+            self.trajectory_buffer.pop(key, None)
 
     # ------------------------------------------------------------------
     # 覆盖：梯度更新 — 注入 FedProx + DP-SGD
@@ -142,8 +232,13 @@ class FederatedClient(DQNBase):
             (k, local_dict[k] if k == 'station_node_ids' else v)
             for k, v in global_state_dict.items()
         )
-        self.policy_net.load_state_dict(filtered)
-        self.target_net.load_state_dict(filtered)
+        try:
+            self.policy_net.load_state_dict(filtered, strict=True)
+        except RuntimeError as e:
+            logger.warning(f"Checkpoint mismatch (likely old single-head): {e}")
+            self.policy_net.load_state_dict(filtered, strict=False)
+            logger.warning("Loaded with strict=False, t2_advantage_fc will use random init")
+        self.target_net.load_state_dict(self.policy_net.state_dict())
         self.global_anchor_params = {
             name: tensor.detach().clone().to(self.device)
             for name, tensor in self.policy_net.state_dict().items()
@@ -287,14 +382,17 @@ class FederatedServer:
         for client in self.clients:
             client.reset_round_counter()
 
-    def save_global_model(self, path="checkpoints/trained_federated_dqn.pth"):
+    def save_global_model(self, path="checkpoints/trained_federated_dqn.pth", episode_idx=None):
         import os
         os.makedirs(os.path.dirname(path), exist_ok=True)
         min_eps = min((c.epsilon for c in self.clients), default=0.05)
-        torch.save({
+        payload = {
             'policy_net': self.global_model.state_dict(),
             'epsilon': min_eps,
-        }, path)
+        }
+        if episode_idx is not None:
+            payload['episode_idx'] = episode_idx
+        torch.save(payload, path)
         print(f"[FedServer] 全局模型已保存: {path}")
 
     def load_global_model(self, path="checkpoints/trained_federated_dqn.pth"):
@@ -307,3 +405,4 @@ class FederatedServer:
         for client in self.clients:
             client.epsilon = eps
         print(f"[FedServer] 全局模型已加载: {path} (epsilon={eps:.3f})")
+        return checkpoint

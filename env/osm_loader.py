@@ -190,14 +190,32 @@ def load_road_network_from_file(
     ext = os.path.splitext(filepath)[1].lower()
     print(f"[LocalFile] 正在加载本地路网文件: {_safe_path_display(filepath)}")
 
+    _loaded_by_nx = False
+
     if ext == ".graphml":
-        G_raw = ox.load_graphml(filepath)
+        try:
+            G_raw = ox.load_graphml(filepath)
+        except Exception:
+            G_raw = nx.read_graphml(filepath)
+            if "crs" not in G_raw.graph:
+                G_raw.graph["crs"] = "epsg:4326"
+            for n, d in G_raw.nodes(data=True):
+                for key in ("x", "y"):
+                    if key in d and not isinstance(d[key], float):
+                        try:
+                            d[key] = float(d[key])
+                        except (ValueError, TypeError):
+                            d[key] = 0.0
+            _loaded_by_nx = True
     elif ext in (".osm", ".xml"):
         G_raw = ox.graph_from_xml(filepath)
     else:
         raise ValueError(f"不支持的文件格式 '{ext}'，请使用 .graphml 或 .osm")
 
-    G_undirected = ox.convert.to_undirected(G_raw)
+    if _loaded_by_nx:
+        G_undirected = nx.Graph(G_raw) if G_raw.is_directed() else G_raw
+    else:
+        G_undirected = ox.convert.to_undirected(G_raw)
     if not _has_contiguous_integer_nodes(G_undirected):
         # convert_node_labels_to_integers 兼容 consolidate_intersections 产生的 frozenset 节点 ID
         G_undirected = nx.convert_node_labels_to_integers(G_undirected)

@@ -102,66 +102,60 @@ class GraphQNetwork(nn.Module):
             edge_dim=num_edge_features
         )
 
-        # 3. Dueling Head
-        #    输入: station_emb(64) + global_ctx(64) = 128
-        #    Value stream:     V(s)    — 与具体站点无关的状态价值
-        #    Advantage stream: A(s,a)  — 各站相对优势
+        # 3. Dueling Head (共享 V(s)，双 Advantage head)
         self.value_fc = nn.Sequential(
             nn.Linear(64 + 64, 64), nn.ReLU(),
             nn.Linear(64, 1)
         )
-        self.advantage_fc = nn.Sequential(
+        # t0 Advantage: per-station, 输入 station_emb(64)+global_ctx(64)=128 → 1
+        self.t0_advantage_fc = nn.Sequential(
             nn.Linear(64 + 64, 64), nn.ReLU(),
             nn.Linear(64, 1)
         )
+        # t2 Advantage: global, 输入 global_ctx(64) → [accept, reject]
+        self.t2_advantage_fc = nn.Sequential(
+            nn.Linear(64, 64), nn.ReLU(),
+            nn.Linear(64, 2),
+        )
+        nn.init.zeros_(self.t2_advantage_fc[-1].weight)
+        nn.init.zeros_(self.t2_advantage_fc[-1].bias)
 
-    def forward(self, data, action_mask=None):
-        """
-        Args:
-            data:        PyG Data/Batch 对象
-            action_mask: 可选，shape [B, num_actions] 的 bool 张量，
-                         False 的动作 Q 值设为 -1e8
-        """
+    def forward(self, data, action_mask=None, action_type='t0'):
         x, edge_index, edge_attr = data.x, data.edge_index, getattr(data, 'edge_attr', None)
 
-        # --- 分组特征编码 ---
-        x = self.feature_encoder(x)                      # [N, 64]
-
-        # --- GATv2 消息传递 ---
+        x = self.feature_encoder(x)
         x = F.relu(self.conv1(x, edge_index, edge_attr=edge_attr))
         x = F.relu(self.conv2(x, edge_index, edge_attr=edge_attr))
 
-        # --- 全局 context ---
         if hasattr(data, 'batch') and data.batch is not None:
             batch = data.batch
         else:
             batch = torch.zeros(x.shape[0], dtype=torch.long, device=x.device)
 
-        global_ctx = global_mean_pool(x, batch)           # [B, 64]
+        global_ctx = global_mean_pool(x, batch)
         batch_size = global_ctx.shape[0]
 
-        # --- Dueling readout：对每个充电站计算 Advantage ---
-        advantages = []
-        for node_id in self.station_node_ids:
-            indices = (torch.arange(batch_size, device=x.device)
-                       * self.num_nodes_per_graph + node_id)
-            station_emb = x[indices]                      # [B, 64]
-            combined = torch.cat([station_emb, global_ctx], dim=1)  # [B, 128]
-            adv = self.advantage_fc(combined)             # [B, 1]
-            advantages.append(adv)
+        global_combined = torch.cat([global_ctx, global_ctx], dim=1)
+        value = self.value_fc(global_combined)
 
-        advantages = torch.cat(advantages, dim=1)         # [B, num_actions]
+        if action_type == 't0':
+            advantages = []
+            for node_id in self.station_node_ids:
+                indices = (torch.arange(batch_size, device=x.device)
+                           * self.num_nodes_per_graph + node_id)
+                station_emb = x[indices]
+                combined = torch.cat([station_emb, global_ctx], dim=1)
+                adv = self.t0_advantage_fc(combined)
+                advantages.append(adv)
+            advantages = torch.cat(advantages, dim=1)
+            q_values = value + advantages - advantages.mean(dim=1, keepdim=True)
 
-        # Value 由全局 context 决定（与具体站无关）
-        global_combined = torch.cat(
-            [global_ctx, global_ctx], dim=1               # [B, 128]
-        )
-        value = self.value_fc(global_combined)            # [B, 1]
+        elif action_type == 't2':
+            q_values = self.t2_advantage_fc(global_ctx)
 
-        # Q = V(s) + A(s,a) − mean_a(A(s,a))
-        q_values = value + advantages - advantages.mean(dim=1, keepdim=True)
+        else:
+            raise ValueError(f"Unknown action_type: {action_type}")
 
-        # --- 无效动作掩码 ---
         if action_mask is not None:
             action_mask = action_mask.to(q_values.device)
             q_values = q_values.masked_fill(~action_mask.bool(), -1e8)

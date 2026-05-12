@@ -102,6 +102,30 @@ class FederatedTrainer:
 
         self.fed_server.distribute_global_model()
 
+        self.start_episode = 0
+        resume_path = getattr(cfg, "resume_path", None)
+        if resume_path:
+            self._load_resume_checkpoint(resume_path)
+
+    def _load_resume_checkpoint(self, resume_path):
+        import re as _re
+        checkpoint = self.fed_server.load_global_model(resume_path)
+        saved_ep = checkpoint.get('episode_idx', None)
+        if saved_ep is not None:
+            self.start_episode = int(saved_ep)
+        else:
+            m = _re.search(r"_ep(\d+)\.pth$", resume_path)
+            if m:
+                self.start_episode = int(m.group(1))
+        extra = getattr(self.cfg, "extra_episodes", 0)
+        if extra > 0:
+            self.cfg.episodes = self.start_episode + extra
+        print(
+            f"[Resume] 从 ep{self.start_episode} 继续, "
+            f"总训练 {self.cfg.episodes} episodes, "
+            f"剩余 {self.cfg.episodes - self.start_episode} episodes"
+        )
+
     def _set_global_seed(self):
         seed = int(getattr(self.cfg, "base_seed", 42))
         random.seed(seed)
@@ -198,6 +222,20 @@ class FederatedTrainer:
             "voltage_excursion": grid_norm,
                 "grid_cost_norm": 0.0,
                 "weighted_sum": weighted_sum,
+            }
+
+        if reward_mode == "lmp_coupled":
+            trip_cost = metrics["trip_time_h"] + metrics["travel_energy_cost"]
+            charge_cost = metrics["charge_cost"]
+            queue_cost = metrics["queue_time_h"]
+            per_ev_r = -(0.3 * trip_cost + 0.03 * charge_cost + 0.5 * queue_cost)
+            clipped = max(-10.0, min(0.0, per_ev_r))
+            return {
+                "reward": clipped,
+                "user_norm": trip_cost,
+                "voltage_excursion": 0.0,
+                "grid_cost_norm": charge_cost,
+                "weighted_sum": -per_ev_r,
             }
 
         raise ValueError(f"Unsupported reward_mode: {reward_mode}")
@@ -432,6 +470,30 @@ class FederatedTrainer:
                             stats["total_decisions"] += 1
                             abandoned_ev._decision_state = None
                             abandoned_ev._decision_snap = None
+                elif getattr(self.cfg, "reward_mode", DEFAULT_REWARD_MODE) == "lmp_coupled":
+                    abandon_ids = set(info.get("abandoned_this_step", []))
+                    if abandon_ids:
+                        ev_lookup = {ev.id: ev for ev in env.evs}
+                        for abandoned_id in abandon_ids:
+                            abandoned_ev = ev_lookup.get(abandoned_id)
+                            if abandoned_ev is None:
+                                continue
+                            decision_state = getattr(abandoned_ev, "_decision_state", None)
+                            decision_snap = getattr(abandoned_ev, "_decision_snap", None)
+                            if decision_state is None or not decision_snap:
+                                continue
+                            next_ev_state = env.get_graph_state_for_ev(abandoned_ev)
+                            client.store_transition(
+                                decision_state,
+                                decision_snap["action"],
+                                -50.0,
+                                next_ev_state,
+                                action_mask=decision_snap.get("action_mask"),
+                            )
+                            stats["total_mixed_reward"] += -50.0
+                            stats["total_decisions"] += 1
+                            abandoned_ev._decision_state = None
+                            abandoned_ev._decision_snap = None
                 for ev, ev_state, act, per_ev_r, mask, metrics in ev_dispatch:
                     if getattr(self.cfg, "reward_mode", DEFAULT_REWARD_MODE) == "baseline":
                         mixed_r = per_ev_r / 2.0
@@ -492,6 +554,148 @@ class FederatedTrainer:
                 ),
                 update_every=25,
             )
+
+        return stats
+
+    def _run_episode_multistep(self, episode_idx):
+        stats = {
+            "total_reward": 0.0,
+            "avg_queue_sum": 0.0,
+            "overload_count": 0,
+            "total_realized": 0.0,
+            "total_mixed_reward": 0.0,
+            "total_decisions": 0,
+            "episode_decision_scan_s": 0.0,
+            "episode_action_build_s": 0.0,
+            "episode_env_step_s": 0.0,
+            "episode_store_s": 0.0,
+            "episode_step_train_s": 0.0,
+            "episode_fed_train_s": 0.0,
+            "episode_agg_s": 0.0,
+            "episode_queue_h_sum": 0.0,
+            "episode_trip_h_sum": 0.0,
+            "episode_service_h_sum": 0.0,
+            "episode_realized_queue_h_sum": 0.0,
+            "episode_realized_service_h_sum": 0.0,
+            "episode_generalized_cost_sum": 0.0,
+            "episode_start_time": time.time(),
+        }
+
+        for env in self.client_envs:
+            env.reset()
+
+        for step_idx in range(self.cfg.steps_per_episode):
+            total_urgent = 0
+
+            for client, env in zip(self.fed_server.clients, self.client_envs):
+                t0_decisions = {}
+
+                t0 = time.perf_counter()
+                t0_evs = env.get_pending_decision_evs()
+                stats["episode_decision_scan_s"] += time.perf_counter() - t0
+
+                actions = {}
+                pending_counts = {s.id: 0 for s in env.stations}
+
+                t0 = time.perf_counter()
+                for ev in t0_evs:
+                    s0 = env.get_graph_state_for_ev(ev, pending_counts)
+                    action_mask = env.get_action_mask(ev, pending_counts=pending_counts)
+                    a0 = client.select_action(s0, action_mask=action_mask, action_type='t0')
+                    a0_int = int(a0) if not isinstance(a0, int) else a0
+                    actions[ev.id] = a0_int
+                    t0_decisions[ev.id] = (s0, a0_int)
+                    if 0 <= a0_int < len(env.stations):
+                        selected_station = env.stations[a0_int]
+                        pending_counts[selected_station.id] = pending_counts.get(selected_station.id, 0) + 1
+                stats["episode_action_build_s"] += time.perf_counter() - t0
+
+                t0 = time.perf_counter()
+                _, reward, _, info = env.step(actions)
+                stats["episode_env_step_s"] += time.perf_counter() - t0
+
+                t0 = time.perf_counter()
+
+                for ev in info["pending_t0"]:
+                    session_id = ev.charge_sessions + 1
+                    if ev.id in t0_decisions:
+                        s0, a0_int = t0_decisions[ev.id]
+                        client.store_step(ev.id, session_id, s0, a0_int, r=0.0, step_type='T0')
+
+                for ev in info["pending_t2"]:
+                    session_id = ev.charge_sessions + 1
+                    s2 = env.get_graph_state_for_ev(ev)
+                    client.backfill_snext(ev.id, session_id, s2)
+                    a2 = client.select_action(s2, action_type='t2')
+                    a2_int = int(a2) if not isinstance(a2, int) else a2
+                    trip_cost = 0.3 * ev.travel_time_h
+                    client.store_step(ev.id, session_id, s2, a2_int, r=-trip_cost, step_type='T2')
+                    stats["total_decisions"] += 1
+                    stats["total_mixed_reward"] += -trip_cost
+                    env.apply_t2_action(ev.id, a2_int)
+                    if a2_int == 1:
+                        s_idle = env.get_graph_state_for_ev(ev)
+                        client.backfill_snext(ev.id, session_id, s_idle)
+                        client.flush_trajectory(ev.id, session_id, abandon=False, terminal=False)
+
+                for ev_data in info["completed"]:
+                    ev_id = ev_data["ev_id"]
+                    ev_obj = env._find_ev_by_id(ev_id)
+                    session_id = ev_obj.charge_sessions
+                    queue_cost = 0.5 * ev_data["actual_queue_time_h"]
+                    charge_cost = 0.03 * ev_data["charging_fee"]
+                    t3_r = -(queue_cost + charge_cost)
+                    client.add_reward(ev_id, session_id, t3_r)
+                    client.flush_trajectory(ev_id, session_id, abandon=False)
+                    stats["total_mixed_reward"] += t3_r
+
+                for ev_data in info["abandoned"]:
+                    ev_id = ev_data["ev_id"]
+                    ev_obj = env._find_ev_by_id(ev_id)
+                    session_id = ev_obj.charge_sessions + 1
+                    client.flush_trajectory(ev_id, session_id, abandon=True)
+                    stats["total_mixed_reward"] += -50.0
+
+                stats["episode_store_s"] += time.perf_counter() - t0
+
+                should_step_train = (
+                    self.cfg.step_local_train_steps > 0
+                    and ((step_idx + 1) % max(1, self.cfg.step_train_interval) == 0)
+                )
+                if should_step_train:
+                    t0 = time.perf_counter()
+                    client.local_train(
+                        self.cfg.batch_size,
+                        num_steps=self.cfg.step_local_train_steps,
+                    )
+                    stats["episode_step_train_s"] += time.perf_counter() - t0
+
+                stats["total_reward"] += reward
+                stats["total_realized"] += info.get("realized_power", 0.0)
+                stats["avg_queue_sum"] += (
+                    sum(len(s.queue) for s in env.stations) / env.num_stations
+                )
+                stats["overload_count"] += int(info.get("voltage_violations", 0))
+                total_urgent += len(t0_evs)
+
+            _print_training_progress(
+                episode=episode_idx,
+                episodes=self.cfg.episodes,
+                step=step_idx,
+                steps_per_episode=self.cfg.steps_per_episode,
+                total_reward=stats["total_reward"],
+                epsilon=min(c.epsilon for c in self.fed_server.clients),
+                episode_start_time=stats["episode_start_time"],
+                extra_metrics=(
+                    f"Power={stats['total_realized']:.0f}kW "
+                    f"QueueAvg={stats['avg_queue_sum'] / ((step_idx + 1) * len(self.client_envs)):.2f} "
+                    f"UrgentEVs={total_urgent}"
+                ),
+                update_every=25,
+            )
+
+        for client in self.fed_server.clients:
+            client.flush_all_pending()
 
         return stats
 
@@ -599,7 +803,7 @@ class FederatedTrainer:
             model_tag = getattr(self.cfg, "graph_group", "l0")
             ckpt_name = f"trained_federated_dqn_real_{model_tag}_ep{episode_idx + 1}.pth"
         ckpt_path = os.path.join(ckpt_dir, ckpt_name)
-        self.fed_server.save_global_model(path=ckpt_path)
+        self.fed_server.save_global_model(path=ckpt_path, episode_idx=episode_idx + 1)
         print(f"[Checkpoint] saved: {ckpt_path}")
 
     def train(self):
@@ -621,8 +825,13 @@ class FederatedTrainer:
         )
         print(f"client_env_seeds={self.client_seeds}\n")
 
-        for episode_idx in range(self.cfg.episodes):
-            stats = self._run_episode(episode_idx)
+        use_multistep = getattr(self.cfg, "use_multistep_mdp", False)
+        run_fn = self._run_episode_multistep if use_multistep else self._run_episode
+        if use_multistep:
+            print("[Mode] 多步 MDP 轨迹收集已启用 (use_multistep_mdp=True)\n")
+
+        for episode_idx in range(self.start_episode, self.cfg.episodes):
+            stats = run_fn(episode_idx)
             round_stats = self._federated_round()
             stats.update(round_stats)
             _finish_progress_line()
@@ -641,7 +850,7 @@ class FederatedTrainer:
             model_tag = getattr(self.cfg, "graph_group", "l0")
             save_name = f"trained_federated_dqn_real_{model_tag}.pth"
         save_path = os.path.join(project_root, "checkpoints", save_name)
-        self.fed_server.save_global_model(path=save_path)
+        self.fed_server.save_global_model(path=save_path, episode_idx=self.cfg.episodes)
         print(f"\n联邦训练完成！全局模型已保存: {save_path}")
 
         if self.cfg.use_dp:
@@ -691,6 +900,9 @@ def run_training_real(
     base_seed=42,
     output_dir=None,
     checkpoint_basename=None,
+    resume_path=None,
+    extra_episodes=0,
+    use_multistep_mdp=False,
 ):
     cfg = TrainConfig(
         num_evs=num_evs,
@@ -730,6 +942,9 @@ def run_training_real(
         base_seed=base_seed,
         output_dir=output_dir,
         checkpoint_basename=checkpoint_basename,
+        resume_path=resume_path,
+        extra_episodes=extra_episodes,
+        use_multistep_mdp=use_multistep_mdp,
     )
     FederatedTrainer(cfg).train()
 

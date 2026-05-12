@@ -147,12 +147,20 @@ class PPPowerGrid33:
                 type="b",
             )
 
-        pp.create_ext_grid(
+        ext_idx = pp.create_ext_grid(
             net,
             bus=bus_indices[1],
             vm_pu=1.0,
             va_degree=0.0,
             name="Slack_Bus_1",
+        )
+
+        pp.create_poly_cost(
+            net,
+            element=ext_idx,
+            et="ext_grid",
+            cp1_eur_per_mw=1000.0,
+            cp2_eur_per_mw2=0.0,
         )
 
         for bus, (p_kw, q_kvar) in IEEE33_LOAD_DATA.items():
@@ -280,6 +288,18 @@ class PPPowerGrid33:
         if bus_num is None:
             raise KeyError(f"Unknown bus identifier: {bus_idx}")
         return self.bus_voltages.get(f"Bus_{bus_num}", 1.0)
+
+    def get_lmp(self):
+        try:
+            net = copy.deepcopy(self.net)
+            pp.runopp(net)
+        except Exception:
+            return None
+        lmp = {}
+        for bus_idx, row in net.res_bus.iterrows():
+            bus_num = int(self.net.bus.at[bus_idx, "name"].split("_")[1])
+            lmp[bus_num] = float(row.lam_p) / 1000.0
+        return lmp
 
 
 __all__ = [

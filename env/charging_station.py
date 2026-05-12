@@ -28,12 +28,16 @@ class ChargingStation:
         self.last_total_load = 0.0
         self.last_billing_price = self.current_price
         self.predicted_arrivals = 0.0
+        self.last_finished_evs = []
         self.arrival_ema_alpha = 0.3
 
-    def update_price(self, tou_multiplier=1.0, price_noise=0.0):
+    def update_price(self, tou_multiplier=1.0, price_noise=0.0, lmp=None):
         congestion = len(self.queue) + len(self.connected_evs)
         self.price_noise = float(price_noise)
-        energy_price = self.base_price * tou_multiplier * (1.0 + self.price_noise)
+        if lmp is not None:
+            energy_price = lmp * (1.0 + self.price_noise)
+        else:
+            energy_price = self.base_price * tou_multiplier * (1.0 + self.price_noise)
         congestion_markup = 0.08 * congestion
         self.current_price = max(
             0.1,
@@ -162,7 +166,7 @@ class ChargingStation:
         self.last_total_load = float(alloc.sum())
         return allocation
 
-    def step(self, tou_multiplier=1.0, price_noise=0.0, step_duration_h=1.0):
+    def step(self, tou_multiplier=1.0, price_noise=0.0, step_duration_h=1.0, lmp=None):
         realized_power = 0.0
 
         while self.queue and len(self.connected_evs) < self.num_chargers:
@@ -185,6 +189,10 @@ class ChargingStation:
             ev.total_energy_charged += energy_kwh
 
             if ev.soc >= 95.0:
+                ev.charge_fee_snapshot = ev.total_fee_paid
+                ev.charge_queue_time_h = ev.wait_time_h
+                ev.charge_travel_time_h = ev.travel_time_h
+                ev.charge_station_id = self.id
                 ev.status = "IDLE"
                 ev.charge_sessions += 1
                 ev.low_soc_triggered = False
@@ -194,8 +202,10 @@ class ChargingStation:
                     ev.soc = random.uniform(20.0, 50.0)
                 finished.append(ev)
 
+        self.last_finished_evs = list(finished)
+
         for ev in finished:
             self.connected_evs.remove(ev)
 
-        self.update_price(tou_multiplier, price_noise=price_noise)
+        self.update_price(tou_multiplier, price_noise=price_noise, lmp=lmp)
         return realized_power

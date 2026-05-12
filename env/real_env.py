@@ -105,6 +105,14 @@ class RealTrafficEnv(TrafficPowerEnv):
 
         self._path_cache_step: dict = {}
 
+        self.lmp_update_interval = 6
+        self._cached_lmp = None
+        self._lmp_step_counter = 0
+        self._completed_evs_this_step = []
+        self._abandoned_evs_this_step = []
+        self._arrivals_this_step = []
+        self._dispatched_t0_this_step = []
+
         print(f"[RealTrafficEnv] nodes={self.num_nodes}, "
               f"station_nodes={station_nodes}, EVs={num_evs})")
 
@@ -134,6 +142,12 @@ class RealTrafficEnv(TrafficPowerEnv):
         self.tou_multiplier = 1.0
         self.price_noise = 0.0
         self.prev_total_load = 0.0
+        self._cached_lmp = None
+        self._lmp_step_counter = 0
+        self._completed_evs_this_step = []
+        self._abandoned_evs_this_step = []
+        self._arrivals_this_step = []
+        self._dispatched_t0_this_step = []
         return self.get_graph_state()
 
     def _build_charging_stations(self, station_nodes):

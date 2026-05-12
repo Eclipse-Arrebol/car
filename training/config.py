@@ -80,9 +80,14 @@ class TrainConfig:
     base_seed: int = 42
     output_dir: Optional[str] = None
     checkpoint_basename: Optional[str] = None
+    resume_path: Optional[str] = None
+    extra_episodes: int = 0
 
     # ── 检查点 ────────────────────────────────────────────────────────
     checkpoint_interval: int = 20   # 每隔多少 episode 保存一次检查点
+
+    # ── 多步 MDP ──────────────────────────────────────────────────────
+    use_multistep_mdp: bool = False  # True: 走新多步轨迹收集路径；False: 旧的单步 store_transition
 
     # ------------------------------------------------------------------
     # 工厂方法

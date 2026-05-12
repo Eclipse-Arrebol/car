@@ -1,3 +1,4 @@
+import logging
 import networkx as nx
 import numpy as np
 import random
@@ -11,6 +12,7 @@ from env.charging_station import ChargingStation
 
 NODE_FEATURE_DIM = 18
 TOTAL_TIME_MASK_THRESHOLD_H = 1.0
+logger = logging.getLogger(__name__)
 
 
 class TrafficPowerEnv:
@@ -50,6 +52,14 @@ class TrafficPowerEnv:
 
         self.edge_index = self._build_edge_index()
         self._path_cache_step: dict = {}
+
+        self.lmp_update_interval = 6
+        self._cached_lmp = None
+        self._lmp_step_counter = 0
+        self._completed_evs_this_step = []
+        self._abandoned_evs_this_step = []
+        self._arrivals_this_step = []
+        self._dispatched_t0_this_step = []
 
     def _reset_mask_stats_and_print(self):
         if hasattr(self, "_mask_stats") and self._mask_stats.get("total", 0) > 0:
@@ -93,6 +103,12 @@ class TrafficPowerEnv:
         self.edge_active_counts = {}
         self.edge_step_counts = {}
         self.edge_peak_counts = {}
+        self._cached_lmp = None
+        self._lmp_step_counter = 0
+        self._completed_evs_this_step = []
+        self._abandoned_evs_this_step = []
+        self._arrivals_this_step = []
+        self._dispatched_t0_this_step = []
         return self.get_graph_state()
 
     def _reset_ev_charging_attempt(self, ev):
@@ -108,6 +124,11 @@ class TrafficPowerEnv:
         ev.charge_decision_pending = ev.soc < self.charge_trigger_soc
         ev.low_soc_triggered = ev.soc < self.charge_trigger_soc
         ev.remaining_replans = 1
+        ev.t2_decision_pending = False
+        ev.t2_action = None
+        ev.t2_state = None
+        ev.t2_pending_steps = 0
+        ev.abandon_reason = None
 
     def should_request_charge_decision(self, ev):
         if ev.status != "IDLE":
@@ -131,6 +152,51 @@ class TrafficPowerEnv:
         pending_evs = [ev for ev in self.evs if self.should_request_charge_decision(ev)]
         pending_evs.sort(key=lambda ev: ev.soc)
         return pending_evs
+
+    def get_pending_decisions(self):
+        t0_initial = [ev for ev in self.evs if self.should_request_charge_decision(ev)]
+        t0_initial.sort(key=lambda ev: ev.soc)
+        t2_arrival = [ev for ev in self.evs if ev.status == "T2_PENDING" and ev.t2_decision_pending]
+        t2_arrival.sort(key=lambda ev: ev.soc)
+        return {"t0_initial": t0_initial, "t2_arrival": t2_arrival}
+
+    def get_completed_evs(self):
+        return list(self._completed_evs_this_step)
+
+    def get_abandoned_evs(self):
+        return list(self._abandoned_evs_this_step)
+
+    def _record_arrival(self, ev, station):
+        ev.t2_step = self.time_step
+        ev.t2_decision_pending = True
+        self._arrivals_this_step.append(ev)
+
+    def _find_ev_by_id(self, ev_id):
+        for ev in self.evs:
+            if ev.id == ev_id:
+                return ev
+        raise ValueError(f"EV {ev_id} not found")
+
+    def apply_t2_action(self, ev_id, action: int):
+        ev = self._find_ev_by_id(ev_id)
+        assert ev.t2_decision_pending, f"EV {ev_id} not in t2_pending state (status={ev.status})"
+        ev.t2_action = action
+        ev.t2_decision_pending = False
+
+        if action == 0:
+            target_station = self.stations[ev.target_station_idx]
+            target_station.queue.append(ev)
+            ev.status = "WAITING"
+            ev.wait_time_h = 0.0
+        elif action == 1:
+            ev.abandon_reason = "manual_reject"
+            self._abandoned_evs_this_step.append({
+                "ev_id": ev.id,
+                "reason": "manual_reject",
+            })
+            self._reset_ev_charging_attempt(ev)
+        else:
+            raise ValueError(f"Invalid t2 action: {action}")
 
     def _find_best_station_metrics(self, ev):
         action_mask = self.get_action_mask(ev)
@@ -568,6 +634,11 @@ class TrafficPowerEnv:
         self.edge_peak_counts = {}
         self._path_cache_step: dict = {}
         abandoned_this_step = []
+        self._arrivals_this_step = []
+        self._completed_evs_this_step = []
+        self._abandoned_evs_this_step = []
+        self._dispatched_t0_this_step = []
+        self._abandon_real_costs = {}
         for ev in self.evs:
             ev.just_abandoned_this_step = False
         grid_loads = {station.power_node_id: 0.0 for station in self.stations}
@@ -583,6 +654,7 @@ class TrafficPowerEnv:
             metrics = self.estimate_action_metrics(ev, station_id, pending_counts=pending_counts)
             decision_metrics[ev.id] = metrics
             pending_counts[station_id] += 1
+        self._dispatched_t0_this_step = list(urgent_evs)
 
         for ev in self.evs:
             if ev.status == "IDLE":
@@ -590,6 +662,9 @@ class TrafficPowerEnv:
                 if ev.id in actions:
                     target_id = actions[ev.id]
                     target_station = self.stations[target_id]
+                    ev.t0_action = target_id
+                    ev.t0_step = self.time_step
+                    ev.travel_time_at_dispatch = ev.travel_time_h
                     try:
                         path = nx.shortest_path(
                             self.traffic_graph,
@@ -607,13 +682,22 @@ class TrafficPowerEnv:
                             ev.current_edge_speed_kph = 0.0
                         else:
                             if len(target_station.queue) >= target_station.max_queue_len:
+                                abandoned_this_step.append(ev.id)
+                                self._abandoned_evs_this_step.append({
+                                    "ev_id": ev.id,
+                                    "reason": "queue_full",
+                                })
+                                ev.abandoned_charge_count += 1
+                                ev.just_abandoned_this_step = True
                                 self._reset_ev_charging_attempt(ev)
                             else:
-                                target_station.queue.append(ev)
                                 ev.target_station_idx = target_id
-                                ev.status = "WAITING"
-                                ev.wait_time_h = 0.0
+                                ev.status = "T2_PENDING"
+                                ev.t2_decision_pending = True
+                                ev.t2_state = self.get_graph_state()
+                                ev.t2_pending_steps = 0
                                 arrivals_this_step[target_station.id] += 1
+                                self._record_arrival(ev, target_station)
                     except Exception:
                         self._reset_ev_charging_attempt(ev)
                 else:
@@ -639,12 +723,21 @@ class TrafficPowerEnv:
                     and ev.curr_node == target_station.traffic_node_id
                 ):
                     if len(target_station.queue) >= target_station.max_queue_len:
+                        abandoned_this_step.append(ev.id)
+                        self._abandoned_evs_this_step.append({
+                            "ev_id": ev.id,
+                            "reason": "queue_full",
+                        })
+                        ev.abandoned_charge_count += 1
+                        ev.just_abandoned_this_step = True
                         self._reset_ev_charging_attempt(ev)
                     else:
-                        target_station.queue.append(ev)
-                        ev.status = "WAITING"
-                        ev.wait_time_h = 0.0
+                        ev.status = "T2_PENDING"
+                        ev.t2_decision_pending = True
+                        ev.t2_state = self.get_graph_state()
+                        ev.t2_pending_steps = 0
                         arrivals_this_step[target_station.id] += 1
+                        self._record_arrival(ev, target_station)
 
             elif ev.status == "WAITING":
                 ev.wait_steps += 1
@@ -658,9 +751,10 @@ class TrafficPowerEnv:
                     ev.abandoned_charge_count += 1
                     ev.just_abandoned_this_step = True
                     abandoned_this_step.append(ev.id)
-                    # 抓住 abandon 真实代价(reset 之前,因为 reset 会清零 wait_time_h)
-                    if not hasattr(self, '_abandon_real_costs'):
-                        self._abandon_real_costs = {}
+                    self._abandoned_evs_this_step.append({
+                        "ev_id": ev.id,
+                        "reason": "timeout",
+                    })
                     self._abandon_real_costs[ev.id] = {
                         "actual_wait_h": ev.wait_time_h,
                         "actual_trip_h": ev.travel_time_h,
@@ -671,17 +765,50 @@ class TrafficPowerEnv:
                 ev.charge_steps += 1
                 ev.charge_time_h += self.step_duration_h
 
+            elif ev.status == "T2_PENDING":
+                ev.t2_pending_steps += 1
+
+        pending_t2_evs = [ev for ev in self.evs if ev.status == "T2_PENDING" and ev.t2_decision_pending]
+        for ev in pending_t2_evs:
+            if ev.t2_pending_steps >= 5:
+                logger.warning(f"EV {ev.id} t2 timeout after {ev.t2_pending_steps} steps, auto-accept")
+                self.apply_t2_action(ev.id, 0)
+
         for station in self.stations:
             station.update_arrival_prediction(arrivals_this_step.get(station.id, 0))
 
         self.tou_multiplier = get_tou_multiplier(self.time_step, self.steps_per_day)
         self.price_noise = random.uniform(-0.1, 0.1)
 
+        lmp_dict = None
+        if hasattr(self.power_grid, "get_lmp"):
+            self._lmp_step_counter += 1
+            if self._cached_lmp is None or self._lmp_step_counter >= self.lmp_update_interval:
+                cur_loads = {s.power_node_id: s.last_total_load for s in self.stations}
+                self.power_grid.net = self.power_grid._net_with_loads(cur_loads)
+                self._cached_lmp = self.power_grid.get_lmp()
+                self._lmp_step_counter = 0
+            lmp_dict = self._cached_lmp
+
         total_realized_power = 0.0
         for station in self.stations:
-            load = station.step(tou_multiplier=self.tou_multiplier, price_noise=self.price_noise, step_duration_h=self.step_duration_h)
+            station_lmp = None
+            if lmp_dict is not None:
+                bus_num = getattr(station, "power_bus_idx", None)
+                if bus_num is not None and bus_num in lmp_dict:
+                    station_lmp = lmp_dict[bus_num]
+            load = station.step(tou_multiplier=self.tou_multiplier, price_noise=self.price_noise, step_duration_h=self.step_duration_h, lmp=station_lmp)
             grid_loads[station.power_node_id] += load
             total_realized_power += load
+            for fin_ev in station.last_finished_evs:
+                self._completed_evs_this_step.append({
+                    "ev_id": fin_ev.id,
+                    "state": None,
+                    "actual_trip_time_h": getattr(fin_ev, "charge_travel_time_h", fin_ev.travel_time_h),
+                    "actual_queue_time_h": getattr(fin_ev, "charge_queue_time_h", fin_ev.wait_time_h),
+                    "charging_fee": getattr(fin_ev, "charge_fee_snapshot", fin_ev.total_fee_paid),
+                })
+                fin_ev.t2_decision_pending = False
 
         self.power_grid.run_power_flow(grid_loads)
         voltage_excursion = sum(
@@ -695,6 +822,12 @@ class TrafficPowerEnv:
 
         user_cost = sum(m["generalized_cost"] for m in decision_metrics.values())
         queue_cost = sum(m["queue_time_h"] for m in decision_metrics.values())
+        actual_abandon_wait = sum(
+            self._abandon_real_costs[ev_id]["actual_wait_h"]
+            for ev_id in abandoned_this_step
+            if ev_id in self._abandon_real_costs
+        )
+        queue_cost = queue_cost + actual_abandon_wait
         grid_cost = sum(st.last_billing_price * st.last_total_load * self.step_duration_h for st in self.stations) + 20.0 * self.power_grid.total_loss
         fluct_cost = (total_realized_power - self.prev_total_load) ** 2
         voltage_penalty = 10.0 * len(self.power_grid.voltage_violations)
@@ -741,6 +874,10 @@ class TrafficPowerEnv:
                 "fluct_cost": fluct_cost,
                 "voltage_penalty": voltage_penalty,
             },
+            "pending_t0": list(self._dispatched_t0_this_step),
+            "pending_t2": list(self._arrivals_this_step),
+            "completed": list(self._completed_evs_this_step),
+            "abandoned": list(self._abandoned_evs_this_step),
         }
 
         self._abandon_real_costs = {}
