@@ -24,6 +24,8 @@ from agents.network import GraphQNetwork
 
 def _clone_data_to_cpu(data):
     """将图数据复制到 CPU，避免回放缓冲区出现混合设备问题。"""
+    if data is None:
+        return None
     return data.clone().cpu()
 
 
@@ -108,11 +110,11 @@ class DQNBase:
     # 经验存储
     # ------------------------------------------------------------------
 
-    def store_transition(self, state, action, reward, next_state, action_mask=None):
+    def store_transition(self, state, action, reward, next_state, action_mask=None, done=False):
         state_cpu = _clone_data_to_cpu(state)
-        next_state_cpu = _clone_data_to_cpu(next_state)
+        next_state_cpu = _clone_data_to_cpu(next_state) if next_state is not None else None
         mask_cpu = action_mask.detach().clone().cpu() if action_mask is not None else None
-        self.memory.append((state_cpu, action, reward, next_state_cpu, mask_cpu))
+        self.memory.append((state_cpu, action, reward, next_state_cpu, mask_cpu, done))
 
     # ------------------------------------------------------------------
     # ε 衰减
@@ -129,7 +131,12 @@ class DQNBase:
     def _prepare_batch(self, minibatch):
         """将采样的经验列表转换为训练所需的张量批次。"""
         state_batch = Batch.from_data_list([m[0] for m in minibatch]).to(self.device)
-        next_state_batch = Batch.from_data_list([m[3] for m in minibatch]).to(self.device)
+        # hindsight 样本 next_state=None,用 state 占位(target Q 会被 done 乘 0 抵消)
+        next_state_list = [
+            m[3] if m[3] is not None else m[0]
+            for m in minibatch
+        ]
+        next_state_batch = Batch.from_data_list(next_state_list).to(self.device)
         action_batch = torch.tensor([m[1] for m in minibatch], device=self.device)
         reward_batch = torch.tensor(
             [m[2] for m in minibatch], dtype=torch.float, device=self.device

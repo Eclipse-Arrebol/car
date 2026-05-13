@@ -5,7 +5,8 @@ import torch
 from torch_geometric.data import Data
 
 from env.entities import EV
-from env.power_grid import PowerGrid, get_tou_multiplier
+from env.power_grid_pp import PPPowerGrid33 as PowerGrid
+from env.power_grid import get_tou_multiplier  # 保留 ToU 函数
 from env.charging_station import ChargingStation
 
 

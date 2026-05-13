@@ -1,7 +1,7 @@
 # 交接文档 · EV 充电导航项目测试驱动阶段
 
 > **写给下一个 Claude session**  
-> **最后更新：2026-05-12**（累计：EMA L1/L2/**L3**、`network` 冒烟、**EMA graphml 限速 m/h 修复**、**环境侧移除 t2 到站决策**、`charging_station` **充满电 snapshot + 会话累计重置 + 路上状态清理**、`pytest` 专项测、Level2 诊断打印）  
+> **最后更新：2026-05-13**（累计：EMA L1/L2/**L3**、`network` 冒烟、**EMA graphml 限速 m/h 修复**、**环境侧移除 t2 到站决策**、`charging_station` **充满电 snapshot + 会话累计重置 + 路上状态清理**、**BPR `ratio` 单位修复**（`c·t0_h` 分母）、**`trainer/` `HindsightTrainer` + `test_trainer_core`**、`pytest` 专项测、Level2 诊断打印、**根目录 `train_hindsight.py` 最小可跑骨架 + 3 episode 冒烟通过**）  
 > 接手时请读 **第二节进度** 与 **第十节测试资产**；纪律与协议仍以 **第四节、第三节** 为准。
 
 ---
@@ -37,6 +37,9 @@
 | `tests/test_snapshot_bug.py`（充满后 **会话** 累计字段 + snapshot 语义） | ✅ 已落地（`pytest`） |
 | `tests/test_respawn_state_cleanup.py`（充满后 **path/边/目标站** 等路上状态清空） | ✅ 已落地（`pytest`） |
 | `tests/test_network.py`（FeatureEncoder / GraphQNetwork 冒烟） | ✅ 已落地 |
+| `tests/test_bpr_congestion.py`（BPR 对 active flow / 单调 / 单位手算） | ✅ 已落地 |
+| **`trainer/trainer.py`**（`HindsightTrainer`：`pending`、`on_dispatch` / `on_completed` / `on_abandoned`、`step_episode`；与 **`training/trainer.py`** 并存，包名不同） | ✅ 已落地（`tests/test_trainer_core.py`） |
+| **根目录 `train_hindsight.py`** | ✅ 已落地；基于 `HindsightTrainer` 的最小训练入口，已完成 3 episode 冒烟 |
 | **`agents/dqn_base.py`** | ⬜ **下一个优先单测文件** |
 | `agents/FederatedDQN.py` | ⬜ 待定 |
 | `training/trainer.py` | ⬜ 待定 |
@@ -57,9 +60,9 @@
 下一文件顺序（与早前规划一致，已从 `entities` 推进到 `network` 之后）：
 
 ```
-… 已完成：entities → charging_station → power_grid_pp → base_env → real_env(offline) → EMA L1/L2/**L3** → agents/network.py → **charging_station 充满语义 pytest**
+… 已完成：entities → charging_station → power_grid_pp → base_env（含 **BPR 拥堵比修复**）→ real_env(offline) → EMA L1/L2/**L3** → agents/network.py → **charging_station 充满语义 pytest** → **`trainer/` HindsightTrainer + `test_trainer_core`**
 → 当前：agents/dqn_base.py
-→ 其后：agents/FederatedDQN.py → training/trainer.py
+→ 其后：agents/FederatedDQN.py → **接线**：`training/trainer.py` 是否复用 `trainer.HindsightTrainer`（Step 3，待定）
 ```
 
 ---
@@ -107,6 +110,7 @@
 
 ### `env/base_env.py` 与 **EMA graphml 限速**
 
+- **`TrafficPowerEnv._bpr_time_h`**：拥挤度 **`ratio = x_flow / max(1, c_capacity * t0_h)`**（`x_flow` 为边上车辆数量级，`c_capacity` 为辆/小时，与 `t0_h` 相乘得「边自由流行程内可服务车辆数」量级）；专项测 **`tests/test_bpr_congestion.py`**。旧式 `c * step_duration_h` 分母已废弃。
 - **`TrafficPowerEnv._parse_speed_kph`**：若数值 **`>= 1000`**，按 **m/h→km/h** 除以 1000（修复 graphml 把米/小时误标为 `speed_kph` 导致 **亚秒级穿边**）。单测见 `tests/test_base_env.py` 中 `test_parse_speed_graphml_m_per_h_mislabeled_as_kph`。
 - **环境侧已无 t2 决策**：到站即 **`_commit_arrival_to_waiting`**（入队 `WAITING`）；已删 **`apply_t2_action`**、**`T2_PENDING`** 及超时 auto-accept 日志；**`get_pending_decisions`** 的 **`t2_arrival` 恒为 `[]`**；**`info["pending_t2"]`** 仍为「本步到站入队 EV」列表（telemetry），**非**待决策队列。
 - **`training/trainer.py`**：`pending_t2` 环已删；`T0` 的 `backfill_snext` 在 **`env.step` 之后**用 `get_graph_state_for_ev` 立即填上。
@@ -152,7 +156,8 @@
    - L1：`python -m pytest tests/test_real_env_ema_graph_integration.py -v -s`  
    - L2：`python -m pytest tests/test_real_env_ema_level2_physics.py -v -s`（可加 **`python -u`** 看 `_diag_print`）  
    - L3：`python -m pytest tests/test_real_env_ema_level3_performance.py -v -s`（**T3.3** 要 **psutil**）  
-5. 专项：`python -m pytest tests/test_snapshot_bug.py tests/test_respawn_state_cleanup.py -v`
+5. 专项：`python -m pytest tests/test_snapshot_bug.py tests/test_respawn_state_cleanup.py -v`  
+6. **Trainer 核心**：`python -m pytest tests/test_trainer_core.py -v`（`HindsightTrainer` + mock agent）
 
 **不要**在未拿到 traceback 时替用户「猜着改」失败用例。
 
@@ -171,7 +176,9 @@
 | `tests/test_entities.py` | `EV` 初始化、`move`、SOC 钳制、`remaining_edge_time_h` |
 | `tests/test_charging_station.py` | 电价、`optimize_power` 限幅、`step` 出队等 |
 | `tests/test_power_grid_pp.py` | `PPPowerGrid33` 解析母线、潮流、`optimize_power` 透传 |
-| `tests/test_base_env.py` | `should_request_charge_decision`、`_find_ev_by_id`、静态解析、`_bpr_time_h` |
+| `tests/test_base_env.py` | `should_request_charge_decision`、`_find_ev_by_id`、静态解析、`_bpr_time_h`（静态点值） |
+| `tests/test_bpr_congestion.py` | BPR 对 **`edge_active_counts`**、单调、`ratio` 与手算一致 |
+| `tests/test_trainer_core.py` | **`trainer.HindsightTrainer`**：pending key（`ev_id, charge_sessions`）、snapshot reward、入 buffer 时机；mock 场景需 **`session_idx_override=0`** |
 | `tests/test_real_env.py` | `offline=True` 合成路网 + `reset`/`step({})` |
 | `tests/test_real_env_ema_graph_integration.py` | **层级 1**：T1.1 路网、T1.2 `reset`（50 EV）、T1.3 单步、`T1.4` 50 步；合法状态**无** `T2_PENDING` |
 | `tests/test_real_env_ema_level2_physics.py` | **层级 2**：T2.1–T2.7 + 诊断输出 |

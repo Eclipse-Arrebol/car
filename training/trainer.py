@@ -16,6 +16,7 @@ from env.real_env import RealTrafficEnv
 from train import _finish_progress_line, _print_training_progress
 from training.config import TrainConfig
 from visualization.visualize_training import TrainingVisualizer
+from visualization.visualize_training import TrainingVisualizer
 
 
 LOCAL_GRAPHML = os.path.join(
@@ -620,9 +621,22 @@ class FederatedTrainer:
                     session_id = ev.charge_sessions + 1
                     if ev.id in t0_decisions:
                         s0, a0_int = t0_decisions[ev.id]
-                        client.store_step(ev.id, session_id, s0, a0_int, r=0.0, step_type='T0')
-                        # 已无 t2 到站决策：用本步 env.step 之后的状态作为 T0 转移的 s'
-                        s_next = env.get_graph_state_for_ev(ev)
+
+                for ev in info["pending_t2"]:
+                    session_id = ev.charge_sessions + 1
+                    s2 = env.get_graph_state_for_ev(ev)
+                    client.backfill_snext(ev.id, session_id, s2)
+                    a2 = client.select_action(s2, action_type='t2')
+                    a2_int = int(a2) if not isinstance(a2, int) else a2
+                    trip_cost = 0.3 * ev.travel_time_h
+                    client.store_step(ev.id, session_id, s2, a2_int, r=-trip_cost, step_type='T2')
+                    stats["total_decisions"] += 1
+                    stats["total_mixed_reward"] += -trip_cost
+                    env.apply_t2_action(ev.id, a2_int)
+                    if a2_int == 1:
+                        s_idle = env.get_graph_state_for_ev(ev)
+                        client.backfill_snext(ev.id, session_id, s_idle)
+                        client.flush_trajectory(ev.id, session_id, abandon=False, terminal=False)
                         client.backfill_snext(ev.id, session_id, s_next)
 
                 for ev_data in info["completed"]:
