@@ -1,0 +1,35 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Cursor / IDE
+.cursor/
+.vscode/
+
+# Training artifacts / checkpoints
+checkpoints/
+checkpoints_*/
+*.pth
+*.pt
+*.ckpt
+
+# Logs / temp files
+*.log
+*.tmp
+*.swp
