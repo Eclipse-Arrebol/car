@@ -133,4 +133,4 @@ class HindsightTrainer:
             self.on_abandoned(entry)
 
         self._current_step += 1
-        return done
+        return done, info

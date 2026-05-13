@@ -28,7 +28,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
         pass  # Python < 3.7 或非 TTY 环境,降级跳过
 
 from env.real_env import RealTrafficEnv
-from train import DQNAgent  # 临时方案: 复用 train.py 里的现成实现
+from agents.hindsight_dqn_agent import HindsightDQNAgent
 from trainer.trainer import HindsightTrainer
 
 
@@ -67,7 +67,7 @@ def main():
         seed=42,
         respawn_after_full_charge=args.respawn,
     )
-    agent = DQNAgent(
+    agent = HindsightDQNAgent(
         num_features=18,
         num_actions=2,
         station_node_ids=None,
@@ -87,9 +87,20 @@ def main():
         trainer._current_step = 0
 
         steps_run = 0
+        ep_trip, ep_queue, ep_fee, ep_reward = [], [], [], []
         for step in range(args.steps_per_episode):
-            done = trainer.step_episode()
+            done, info = trainer.step_episode()
             steps_run += 1
+
+            for entry in info.get("completed", []):
+                trip = float(entry.get("actual_trip_time_h", 0.0))
+                queue = float(entry.get("actual_queue_time_h", 0.0))
+                fee = float(entry.get("charging_fee", 0.0))
+                reward = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
+                ep_trip.append(trip)
+                ep_queue.append(queue)
+                ep_fee.append(fee)
+                ep_reward.append(reward)
 
             if len(agent.memory) >= args.batch_size:
                 agent.replay(args.batch_size)
@@ -101,12 +112,24 @@ def main():
             epsilon = getattr(agent, "epsilon", None)
             eps_str = f"{epsilon:.3f}" if isinstance(epsilon, (int, float)) else "N/A"
             elapsed = time.time() - t0
+
+            def _avg(vals):
+                return sum(vals) / len(vals) if vals else 0.0
+
             print(f"[ep {episode+1}/{args.episodes}] "
                   f"steps={steps_run} "
                   f"buffer={len(agent.memory)} "
                   f"pending={len(trainer.pending)} "
                   f"epsilon={eps_str} "
                   f"elapsed={elapsed:.1f}s")
+            print(
+                f"[ep {episode+1}/{args.episodes}] avg_trip={_avg(ep_trip):.4f}h "
+                f"avg_queue={_avg(ep_queue):.4f}h "
+                f"avg_fee={_avg(ep_fee):.4f} "
+                f"avg_reward={_avg(ep_reward):.4f}"
+            )
+
+        agent.decay_epsilon()
 
         if (episode + 1) % args.save_every == 0:
             path = os.path.join(args.save_dir, f"model_ep{episode+1}.pth")

@@ -155,78 +155,27 @@ class DQNBase:
         return (state_batch, next_state_batch, action_batch, reward_batch,
                 mask_batch, done_batch, step_types)
 
-    def _compute_td_loss_single_head(self, s, s_next, a, r, done,
-                                     current_type, next_type):
-        q_values = self.policy_net(s, action_type=current_type)
-        curr_q = q_values.gather(1, a.unsqueeze(1)).squeeze(1)
-
-        with torch.no_grad():
-            next_q_policy = self.policy_net(s_next, action_type=next_type)
-            next_actions = next_q_policy.argmax(1, keepdim=True)
-            next_q = self.target_net(s_next, action_type=next_type).gather(
-                1, next_actions).squeeze(1)
-            target_q = r + 0.99 * next_q * (1.0 - done)
-
-        return F.mse_loss(curr_q, target_q)
-
     def _compute_td_loss(self, state_batch, next_state_batch, action_batch,
                          reward_batch, mask_batch, done_batch=None,
                          step_type_batch=None):
         reward_batch = torch.clamp(reward_batch, min=-500.0, max=50.0)
 
-        if step_type_batch is None or all(st is None for st in step_type_batch):
-            q_values = self.policy_net(state_batch, action_type='t0')
-            curr_q = q_values.gather(1, action_batch.unsqueeze(1)).squeeze(1)
+        q_values = self.policy_net(state_batch, action_type='t0')
+        curr_q = q_values.gather(1, action_batch.unsqueeze(1)).squeeze(1)
 
-            with torch.no_grad():
-                next_q_policy = self.policy_net(
-                    next_state_batch, action_mask=mask_batch, action_type='t0')
-                next_actions = next_q_policy.argmax(1, keepdim=True)
-                next_q = self.target_net(
-                    next_state_batch, action_type='t0').gather(
-                    1, next_actions).squeeze(1)
-                if done_batch is not None:
-                    target_q = reward_batch + 0.99 * next_q * (1.0 - done_batch)
-                else:
-                    target_q = reward_batch + 0.99 * next_q
+        with torch.no_grad():
+            next_q_policy = self.policy_net(
+                next_state_batch, action_mask=mask_batch, action_type='t0')
+            next_actions = next_q_policy.argmax(1, keepdim=True)
+            next_q = self.target_net(
+                next_state_batch, action_type='t0').gather(
+                1, next_actions).squeeze(1)
+            if done_batch is not None:
+                target_q = reward_batch + 0.99 * next_q * (1.0 - done_batch)
+            else:
+                target_q = reward_batch + 0.99 * next_q
 
-            return F.mse_loss(curr_q, target_q)
-
-        t0_idx = [i for i, st in enumerate(step_type_batch) if st == 'T0']
-        t2_idx = [i for i, st in enumerate(step_type_batch) if st == 'T2']
-        B = len(step_type_batch)
-
-        losses = []
-        total_weight = 0.0
-
-        if t0_idx:
-            idx = torch.tensor(t0_idx, device=self.device)
-            loss_t0 = self._compute_td_loss_single_head(
-                Batch.from_data_list([state_batch[i] for i in t0_idx]).to(self.device),
-                Batch.from_data_list([next_state_batch[i] for i in t0_idx]).to(self.device),
-                action_batch[idx], reward_batch[idx], done_batch[idx],
-                current_type='t0', next_type='t0',
-            )
-            losses.append(loss_t0 * len(t0_idx))
-            total_weight += len(t0_idx)
-
-        if t2_idx:
-            idx = torch.tensor(t2_idx, device=self.device)
-            loss_t2 = self._compute_td_loss_single_head(
-                Batch.from_data_list([state_batch[i] for i in t2_idx]).to(self.device),
-                Batch.from_data_list([next_state_batch[i] for i in t2_idx]).to(self.device),
-                action_batch[idx], reward_batch[idx], done_batch[idx],
-                current_type='t2', next_type='t0',
-            )
-            losses.append(loss_t2 * len(t2_idx))
-            total_weight += len(t2_idx)
-
-        if not losses:
-            q_values = self.policy_net(state_batch, action_type='t0')
-            curr_q = q_values.gather(1, action_batch.unsqueeze(1)).squeeze(1)
-            return F.mse_loss(curr_q, torch.zeros_like(curr_q))
-
-        return sum(losses) / max(1.0, total_weight)
+        return F.mse_loss(curr_q, target_q)
 
     def _apply_gradients(self, loss, batch_size=None):
         """反向传播 + 梯度裁剪 + 参数更新。
