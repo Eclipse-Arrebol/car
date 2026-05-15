@@ -20,6 +20,8 @@ from torch_geometric.data import Batch
 from collections import deque
 
 from agents.network import GraphQNetwork
+from agents.network_light import LightweightGraphQNetwork
+from agents.network_station_only import StationOnlyGraphQNetwork
 
 
 def _clone_data_to_cpu(data):
@@ -38,22 +40,39 @@ class DQNBase:
         num_nodes_per_graph=9,
         lr=0.0003,
         memory_size=20000,
-        epsilon_decay=0.9999,
+        epsilon_decay=0.994,
         epsilon_min=0.05,
         target_update_freq=100,
+        network_variant="station_only",
+        use_action_mask=True,
     ):
         self.num_actions = num_actions
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.policy_net = GraphQNetwork(
+        net_cls = {
+            "original": GraphQNetwork,
+            "lightweight": LightweightGraphQNetwork,
+            "station_only": StationOnlyGraphQNetwork,
+        }.get(network_variant)
+        if net_cls is None:
+            raise ValueError(
+                f"Unknown network_variant: {network_variant}. "
+                "Expected one of: original, lightweight, station_only"
+            )
+
+        self.network_variant = network_variant
+        self.use_action_mask = use_action_mask
+        self.policy_net = net_cls(
             num_features, num_actions,
             station_node_ids=station_node_ids,
             num_nodes_per_graph=num_nodes_per_graph,
+            use_action_mask=use_action_mask,
         ).to(self.device)
-        self.target_net = GraphQNetwork(
+        self.target_net = net_cls(
             num_features, num_actions,
             station_node_ids=station_node_ids,
             num_nodes_per_graph=num_nodes_per_graph,
+            use_action_mask=use_action_mask,
         ).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
@@ -75,21 +94,12 @@ class DQNBase:
     # ------------------------------------------------------------------
 
     def select_action(self, state_data, action_mask=None, action_type='t0'):
-        """ε-greedy 动作选择，探索时同样遵守动作掩码。
-
-        action_type:
-          't0' — 所有充电站可选（默认，向后兼容）
-          't2' — 只选 0(accept) 或 1(reject)，由 t2_head 直接输出 2 维
-        """
-        if action_type == 't2':
-            num_valid_actions = 2
-        else:
-            num_valid_actions = self.num_actions
+        """ε-greedy 动作选择，探索时同样遵守动作掩码。"""
+        if action_mask is not None:
+            action_mask = action_mask.to(self.device)
 
         if random.random() < self.epsilon:
-            if action_type == 't2':
-                return random.randrange(num_valid_actions)
-            if action_mask is not None:
+            if self.use_action_mask and action_mask is not None:
                 valid = action_mask.squeeze().nonzero(as_tuple=True)[0].tolist()
                 if valid:
                     return random.choice(valid)
@@ -97,13 +107,8 @@ class DQNBase:
 
         with torch.no_grad():
             state_data = state_data.to(self.device)
-            if action_type == 't2':
-                q_values = self.policy_net(state_data, action_type='t2')
-            else:
-                if action_mask is not None:
-                    action_mask = action_mask.to(self.device)
-                q_values = self.policy_net(state_data, action_mask=action_mask,
-                                           action_type='t0')
+            network_mask = action_mask if self.use_action_mask else None
+            q_values = self.policy_net(state_data, action_mask=network_mask, action_type='t0')
             return int(q_values.argmax().item())
 
     # ------------------------------------------------------------------
@@ -141,11 +146,14 @@ class DQNBase:
         reward_batch = torch.tensor(
             [m[2] for m in minibatch], dtype=torch.float, device=self.device
         )
-        mask_list = [
-            m[4] if len(m) > 4 and m[4] is not None else self.default_action_mask
-            for m in minibatch
-        ]
-        mask_batch = torch.cat(mask_list, dim=0).to(self.device)
+        if self.use_action_mask:
+            mask_list = [
+                m[4] if len(m) > 4 and m[4] is not None else self.default_action_mask
+                for m in minibatch
+            ]
+            mask_batch = torch.cat(mask_list, dim=0).to(self.device)
+        else:
+            mask_batch = None
         done_list = [
             m[5] if len(m) > 5 else False
             for m in minibatch

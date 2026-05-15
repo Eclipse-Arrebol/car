@@ -1,3 +1,4 @@
+import math
 import networkx as nx
 import numpy as np
 import random
@@ -8,25 +9,61 @@ from env.entities import EV
 from env.power_grid_pp import PPPowerGrid33 as PowerGrid
 from env.power_grid import get_tou_multiplier  # 保留 ToU 函数
 from env.charging_station import ChargingStation
+from env.background_traffic import build_daily_profile, build_base_background_flows
 
 
 NODE_FEATURE_DIM = 18
 TOTAL_TIME_MASK_THRESHOLD_H = 1.0
 
 
+def setup_background_traffic_and_respawn_nodes(env) -> None:
+    """在 `traffic_graph` 与 `stations` 已就绪后调用（网格 env 与 RealTrafficEnv 共用）。"""
+    env.legal_respawn_nodes = list(env.traffic_graph.nodes())
+    for station in env.stations:
+        station.legal_respawn_nodes = list(env.traffic_graph.nodes())
+    env.background_daily_profile = build_daily_profile(env.steps_per_day)
+    env.background_edge_base_flows = build_base_background_flows(
+        env.traffic_graph.edges(),
+        env.traffic_graph.nodes(),
+        net_tntp_path=getattr(env, "background_ue_net_tntp", None),
+        trips_tntp_path=getattr(env, "background_ue_trips_tntp", None),
+        ue_scale=float(getattr(env, "background_ue_scale", 1.0)),
+        ue_max_iter=int(getattr(env, "background_ue_max_iter", 100)),
+        ue_tol=float(getattr(env, "background_ue_tol", 1e-4)),
+        ue_verbose=bool(getattr(env, "background_ue_verbose", False)),
+    )
+    env.background_edge_flows = {}
+
+
 class TrafficPowerEnv:
-    def __init__(self, num_evs=10, respawn_after_full_charge=True):
+    def __init__(
+        self,
+        num_evs=10,
+        respawn_after_full_charge=True,
+        num_chargers_per_station: int = 4,
+    ):
         self.traffic_graph = nx.grid_2d_graph(3, 3)
         self.traffic_graph = nx.convert_node_labels_to_integers(self.traffic_graph)
         self.num_evs = num_evs
         self.respawn_after_full_charge = respawn_after_full_charge
+        self.num_chargers_per_station = max(1, int(num_chargers_per_station))
         self.charge_trigger_soc = 30.0
 
         self.stations = [
-            ChargingStation(station_id=0, traffic_node_id=0, power_node_id="Grid_A",
-                            respawn_after_full_charge=self.respawn_after_full_charge),
-            ChargingStation(station_id=1, traffic_node_id=8, power_node_id="Grid_B",
-                            respawn_after_full_charge=self.respawn_after_full_charge)
+            ChargingStation(
+                station_id=0,
+                traffic_node_id=0,
+                power_node_id="Grid_A",
+                num_chargers=self.num_chargers_per_station,
+                respawn_after_full_charge=self.respawn_after_full_charge,
+            ),
+            ChargingStation(
+                station_id=1,
+                traffic_node_id=8,
+                power_node_id="Grid_B",
+                num_chargers=self.num_chargers_per_station,
+                respawn_after_full_charge=self.respawn_after_full_charge,
+            ),
         ]
 
         self.evs = []
@@ -43,6 +80,8 @@ class TrafficPowerEnv:
         self.edge_active_counts = {}
         self.edge_step_counts = {}
         self.edge_peak_counts = {}
+
+        setup_background_traffic_and_respawn_nodes(self)
 
         self.power_grid = PowerGrid()
         self.tou_multiplier = 1.0
@@ -84,10 +123,20 @@ class TrafficPowerEnv:
     def reset(self):
         self._reset_mask_stats_and_print()
         self.stations = [
-            ChargingStation(station_id=0, traffic_node_id=0, power_node_id="Grid_A",
-                            respawn_after_full_charge=self.respawn_after_full_charge),
-            ChargingStation(station_id=1, traffic_node_id=8, power_node_id="Grid_B",
-                            respawn_after_full_charge=self.respawn_after_full_charge)
+            ChargingStation(
+                station_id=0,
+                traffic_node_id=0,
+                power_node_id="Grid_A",
+                num_chargers=self.num_chargers_per_station,
+                respawn_after_full_charge=self.respawn_after_full_charge,
+            ),
+            ChargingStation(
+                station_id=1,
+                traffic_node_id=8,
+                power_node_id="Grid_B",
+                num_chargers=self.num_chargers_per_station,
+                respawn_after_full_charge=self.respawn_after_full_charge,
+            ),
         ]
         self.evs = []
         for i in range(self.num_evs):
@@ -108,6 +157,7 @@ class TrafficPowerEnv:
         self._abandoned_evs_this_step = []
         self._arrivals_this_step = []
         self._dispatched_t0_this_step = []
+        setup_background_traffic_and_respawn_nodes(self)
         return self.get_graph_state()
 
     def _reset_ev_charging_attempt(self, ev):
@@ -308,6 +358,25 @@ class TrafficPowerEnv:
     def _edge_flow(self, u, v):
         return float(self.edge_active_counts.get((u, v), 0) + self.edge_active_counts.get((v, u), 0))
 
+    def _background_flow(self, u, v):
+        key = (u, v)
+        rev_key = (v, u)
+        return float(
+            self.background_edge_flows.get(key)
+            or self.background_edge_flows.get(rev_key)
+            or self.background_edge_base_flows.get(key)
+            or self.background_edge_base_flows.get(rev_key)
+            or 0.0
+        )
+
+    def update_background_traffic(self):
+        step_idx = self.time_step % self.steps_per_day
+        profile = self.background_daily_profile[step_idx]
+        noise_scale = 1.0 + 0.05 * math.sin(2.0 * math.pi * (step_idx / max(1, self.steps_per_day)))
+        self.background_edge_flows = {}
+        for edge, base in self.background_edge_base_flows.items():
+            self.background_edge_flows[edge] = float(base * profile * noise_scale)
+
     def _bpr_time_h(self, t0_h, x_flow, c_capacity):
         capacity_concurrent = max(1.0, float(c_capacity) * float(t0_h))
         ratio = max(0.0, float(x_flow)) / capacity_concurrent
@@ -316,7 +385,7 @@ class TrafficPowerEnv:
     def _dynamic_profiles(self, u, v, add_vehicle=0.0):
         edge_data = self.traffic_graph.get_edge_data(u, v, default={})
         base_profiles = self._edge_profiles_from_data(edge_data)
-        x_flow = self._edge_flow(u, v) + float(add_vehicle)
+        x_flow = self._edge_flow(u, v) + self._background_flow(u, v) + float(add_vehicle)
 
         dyn = []
         for length_m, speed_kph, t0_h, capacity_vehph in base_profiles:
@@ -610,6 +679,7 @@ class TrafficPowerEnv:
 
     def step(self, actions):
         self.time_step += 1
+        self.update_background_traffic()
         self.edge_step_counts = {}
         self.edge_peak_counts = {}
         self._path_cache_step: dict = {}

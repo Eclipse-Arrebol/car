@@ -151,6 +151,32 @@ def load_road_network(
     return result
 
 
+def _coerce_graphml_numeric_attrs(G) -> None:
+    """GraphML 经 OSMnx 读入后节点/边属性可能为 str；转为 float 供 SciPy 邻接与 BPR 使用。"""
+    for _, d in G.nodes(data=True):
+        for key in ("x", "y"):
+            if key not in d or d[key] is None:
+                continue
+            if isinstance(d[key], (int, float)):
+                d[key] = float(d[key])
+                continue
+            try:
+                d[key] = float(d[key])
+            except (TypeError, ValueError):
+                d[key] = 0.0
+    for _, _, d in G.edges(data=True):
+        for key in ("length", "speed_kph", "capacity", "weight"):
+            if key not in d or d[key] is None:
+                continue
+            if isinstance(d[key], (int, float)):
+                d[key] = float(d[key])
+                continue
+            try:
+                d[key] = float(d[key])
+            except (TypeError, ValueError):
+                pass
+
+
 # ============================================================
 # 从本地文件加载路网（GraphML / OSM XML）
 # ============================================================
@@ -207,6 +233,9 @@ def load_road_network_from_file(
                         except (ValueError, TypeError):
                             d[key] = 0.0
             _loaded_by_nx = True
+        _coerce_graphml_numeric_attrs(G_raw)
+        if "crs" not in G_raw.graph:
+            G_raw.graph["crs"] = "epsg:4326"
     elif ext in (".osm", ".xml"):
         G_raw = ox.graph_from_xml(filepath)
     else:

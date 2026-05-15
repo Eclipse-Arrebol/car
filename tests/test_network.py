@@ -12,6 +12,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from agents.network import FeatureEncoder, GraphQNetwork  # noqa: E402
+from agents.network_light import LightweightFeatureEncoder, LightweightGraphQNetwork  # noqa: E402
 
 
 def _tiny_grid_data(num_nodes: int = 9, num_edges: int = 24) -> Data:
@@ -54,6 +55,39 @@ class TestGraphQNetwork(unittest.TestCase):
 
     def test_forward_t2_shape(self):
         q = self.net(self.data, action_mask=None, action_type="t2")
+        self.assertEqual(q.shape, (1, 2))
+        self.assertTrue(torch.isfinite(q).all())
+
+    def test_action_mask_masks_invalid(self):
+        mask = torch.tensor([[True, False]], dtype=torch.bool)
+        q = self.net(self.data, action_mask=mask, action_type="t0")
+        self.assertEqual(q[0, 1].item(), -1e8)
+
+    def test_unknown_action_type_raises(self):
+        with self.assertRaises(ValueError):
+            self.net(self.data, action_type="unknown")
+
+
+class TestLightweightNetwork(unittest.TestCase):
+    def setUp(self):
+        self.data = _tiny_grid_data()
+        self.net = LightweightGraphQNetwork(
+            num_features=18,
+            num_actions=2,
+            station_node_ids=[0, 8],
+            num_nodes_per_graph=9,
+            num_edge_features=2,
+        )
+
+    def test_feature_encoder_shape_and_finite(self):
+        enc = LightweightFeatureEncoder(out_dim=48)
+        x = torch.randn(11, 18)
+        y = enc(x)
+        self.assertEqual(y.shape, (11, 48))
+        self.assertTrue(torch.isfinite(y).all())
+
+    def test_forward_t0_shape_and_finite(self):
+        q = self.net(self.data, action_mask=None, action_type="t0")
         self.assertEqual(q.shape, (1, 2))
         self.assertTrue(torch.isfinite(q).all())
 

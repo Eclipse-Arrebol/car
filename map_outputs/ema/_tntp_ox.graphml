@@ -1,8 +1,8 @@
 <?xml version='1.0' encoding='utf-8'?>
-<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd"><key id="d6" for="edge" attr.name="weight" attr.type="string"/>
-<key id="d5" for="edge" attr.name="capacity" attr.type="string"/>
-<key id="d4" for="edge" attr.name="speed_kph" attr.type="string"/>
-<key id="d3" for="edge" attr.name="length" attr.type="string"/>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd"><key id="d6" for="edge" attr.name="weight" attr.type="double"/>
+<key id="d5" for="edge" attr.name="capacity" attr.type="double"/>
+<key id="d4" for="edge" attr.name="speed_kph" attr.type="double"/>
+<key id="d3" for="edge" attr.name="length" attr.type="double"/>
 <key id="d2" for="node" attr.name="y" attr.type="string"/>
 <key id="d1" for="node" attr.name="x" attr.type="string"/>
 <key id="d0" for="graph" attr.name="crs" attr.type="string"/>

@@ -4,7 +4,7 @@ import random
 
 class ChargingStation:
     def __init__(self, station_id, traffic_node_id, power_node_id,
-                 num_chargers=4, max_charger_power=20.0, max_grid_power=50.0,
+                 num_chargers=4, max_charger_power=60.0, max_grid_power=600.0,
                  respawn_after_full_charge=True):
         self.id = station_id
         self.traffic_node_id = traffic_node_id
@@ -30,6 +30,7 @@ class ChargingStation:
         self.predicted_arrivals = 0.0
         self.last_finished_evs = []
         self.arrival_ema_alpha = 0.3
+        self.legal_respawn_nodes = []
 
     def update_price(self, tou_multiplier=1.0, price_noise=0.0, lmp=None):
         congestion = len(self.queue) + len(self.connected_evs)
@@ -166,6 +167,14 @@ class ChargingStation:
         self.last_total_load = float(alloc.sum())
         return allocation
 
+    def _choose_respawn_node(self, ev):
+        candidates = getattr(self, "legal_respawn_nodes", None)
+        if candidates:
+            valid = [node for node in candidates if node != ev.curr_node]
+            if valid:
+                return random.choice(valid)
+        return ev.curr_node
+
     def step(self, tou_multiplier=1.0, price_noise=0.0, step_duration_h=1.0, lmp=None):
         realized_power = 0.0
 
@@ -212,7 +221,7 @@ class ChargingStation:
                 ev.charge_decision_pending = False
                 ev.remaining_replans = 1
                 if self.respawn_after_full_charge:
-                    ev.soc = random.uniform(20.0, 50.0)
+                    ev.reset_for_respawn(self._choose_respawn_node(ev), random.uniform(10.0, 20.0))
                 finished.append(ev)
 
         self.last_finished_evs = list(finished)

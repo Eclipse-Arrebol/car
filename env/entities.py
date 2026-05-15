@@ -46,6 +46,23 @@ class EV:
         self.travel_time_at_dispatch = 0.0  # 多步遗留：派发决策时累计行驶时间
         self.abandon_reason = None  # 放弃充电原因码/说明
 
+    def reset_for_respawn(self, new_node, new_soc):
+        self.curr_node = new_node  # 重生后的新起点节点
+        self.soc = float(new_soc)  # 重生后的低电量 SOC
+        self.target_station_idx = None  # 清空旧站点目标
+        self.assigned_station = None  # 清空旧站点引用
+        self.path = []  # 清空旧路径
+        self.last_traversed_nodes = []  # 清空旧轨迹
+        self.current_edge_from = None  # 清空边起点
+        self.current_edge_target = None  # 清空边终点
+        self.remaining_edge_time_h = 0.0  # 清空剩余边时间
+        self.current_edge_speed_kph = 0.0  # 清空边速度
+        self.current_edge_length_m = 0.0  # 清空边长度
+        self.low_soc_triggered = False  # 重新允许低 SOC 触发
+        self.charge_decision_pending = False  # 清空决策挂起
+        self.remaining_replans = 1  # 恢复默认重规划次数
+        self.status = "IDLE"  # 重生后回到空闲态
+
     def move(self, env, step_hours=1.0):
         self.last_traversed_nodes = []
         if self.status != "MOVING_TO_CHARGE":

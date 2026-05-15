@@ -16,12 +16,16 @@ class HindsightDQNAgent(DQNBase):
     """面向 hindsight 训练场景的 Double DQN 智能体。"""
 
     def __init__(self, num_features, num_actions,
-                 station_node_ids=None, num_nodes_per_graph=9):
+                 station_node_ids=None, num_nodes_per_graph=9,
+                 network_variant="station_only",
+                 use_action_mask=True):
         super().__init__(
             num_features, num_actions,
             station_node_ids=station_node_ids,
             num_nodes_per_graph=num_nodes_per_graph,
             memory_size=50000,
+            network_variant=network_variant,
+            use_action_mask=use_action_mask,
         )
 
     def replay(self, batch_size):

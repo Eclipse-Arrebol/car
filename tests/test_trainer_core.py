@@ -49,10 +49,13 @@ class _MockAgent:
 def test_pending_key_uses_charge_sessions_for_isolation():
     """同一 EV 完成两次充电, buffer 里两条 transition 独立。"""
     env = TrafficPowerEnv(num_evs=1)
+    env.reset()
+    # EV 初始 SOC 随机；若 >= charge_trigger_soc(30) 则永不进入待决策队列，step 不会 dispatch
+    _ensure_low_soc_idle_pending(env)
     agent = _MockAgent()
     trainer = HindsightTrainer(env, agent)
 
-    for _ in range(200):
+    for _ in range(800):
         trainer.step_episode()
         if len(agent.transitions) >= 2:
             break

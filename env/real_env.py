@@ -1,10 +1,12 @@
 import random, sys, os
+from typing import Optional
+
 import numpy as np
 import networkx as nx
 import torch
 from torch_geometric.data import Data
 
-from env.base_env import TrafficPowerEnv
+from env.base_env import TrafficPowerEnv, setup_background_traffic_and_respawn_nodes
 from env.entities import EV
 from env.charging_station import ChargingStation
 from env.power_grid import get_tou_multiplier
@@ -41,8 +43,22 @@ class RealTrafficEnv(TrafficPowerEnv):
         offline: bool = False,
         station_node_ids: list = None,
         respawn_after_full_charge: bool = True,
+        num_chargers_per_station: int = 4,
+        background_ue_net_tntp: Optional[str] = None,
+        background_ue_trips_tntp: Optional[str] = None,
+        background_ue_scale: float = 1.0,
+        background_ue_max_iter: int = 800,
+        background_ue_tol: float = 1e-4,
+        background_ue_verbose: bool = False,
     ):
         self.respawn_after_full_charge = respawn_after_full_charge
+        self.num_chargers_per_station = max(1, int(num_chargers_per_station))
+        self.background_ue_net_tntp = background_ue_net_tntp
+        self.background_ue_trips_tntp = background_ue_trips_tntp
+        self.background_ue_scale = float(background_ue_scale)
+        self.background_ue_max_iter = int(background_ue_max_iter)
+        self.background_ue_tol = float(background_ue_tol)
+        self.background_ue_verbose = bool(background_ue_verbose)
         if graphml_file is not None:
             graph, station_nodes, self.node_positions = load_road_network_from_file(
                 filepath=graphml_file,
@@ -101,6 +117,7 @@ class RealTrafficEnv(TrafficPowerEnv):
         self.tou_multiplier = 1.0
         self.price_noise = 0.0
         self.prev_total_load = 0.0
+        setup_background_traffic_and_respawn_nodes(self)
         self.edge_index = self._build_edge_index()
 
         self._path_cache_step: dict = {}
@@ -125,6 +142,7 @@ class RealTrafficEnv(TrafficPowerEnv):
             }
         )
         self.stations = self._build_charging_stations(self.station_node_ids)
+        setup_background_traffic_and_respawn_nodes(self)
 
         non_station = [n for n in self.traffic_graph.nodes()
                        if n not in self.station_node_ids]
@@ -157,6 +175,7 @@ class RealTrafficEnv(TrafficPowerEnv):
                 station_id=i,
                 traffic_node_id=station_nodes[i],
                 power_node_id=self.power_grid.get_station_power_node(i),
+                num_chargers=self.num_chargers_per_station,
                 respawn_after_full_charge=self.respawn_after_full_charge,
             )
             station.power_bus_idx = IEEE33_STATION_BUSES[i]

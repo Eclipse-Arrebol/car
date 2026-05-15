@@ -87,7 +87,7 @@ def _run_policy(args, policy_name, policy_fn):
         steps_run = 0
 
         for _ in range(args.steps_per_episode):
-            done, info = _step_with_policy(env, policy_fn)
+            _obs, _reward, done, info = _step_with_policy(env, policy_fn)
             steps_run += 1
 
             for entry in info.get("completed", []):
