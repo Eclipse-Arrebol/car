@@ -96,10 +96,17 @@ class PPPowerGrid33:
 
     _THEVENIN_CACHE = None
 
-    def __init__(self, station_bus_map=None, compute_thevenin=True):
+    def __init__(
+        self,
+        station_bus_map=None,
+        compute_thevenin=True,
+        client_name: str = "base",
+        net=None,
+    ):
         self.v_nominal_kv = 12.66
         self.v_min = 0.95
         self.v_max = 1.05
+        self.client_name = client_name
         self.station_bus_map = dict(station_bus_map or IEEE33_STATION_BUSES)
         self.station_power_nodes = {
             station_id: f"Bus_{bus}"
@@ -110,17 +117,10 @@ class PPPowerGrid33:
             for station_id, power_node in self.station_power_nodes.items()
             for bus in [self.station_bus_map[station_id]]
         }
-        self.base_net = self._build_ieee33_net()
+        self.base_net = copy.deepcopy(net) if net is not None else self._build_ieee33_net()
         self.net = copy.deepcopy(self.base_net)
-        self.bus_lookup = {
-            int(str(row["name"]).split("_")[1]): idx
-            for idx, row in self.net.bus.iterrows()
-        }
-        self.line_lookup = {}
-        for idx, row in self.net.line.iterrows():
-            from_bus = int(self.net.bus.at[row.from_bus, "name"].split("_")[1])
-            to_bus = int(self.net.bus.at[row.to_bus, "name"].split("_")[1])
-            self.line_lookup[f"{from_bus}-{to_bus}"] = idx
+        self.bus_lookup = self._build_bus_lookup(self.net)
+        self.line_lookup = self._build_line_lookup(self.net)
 
         self.bus_voltages = {f"Bus_{i}": 1.0 for i in range(1, 34)}
         self.line_losses = {}
@@ -186,6 +186,45 @@ class PPPowerGrid33:
             )
         return net
 
+    @staticmethod
+    def _parse_bus_number(name, fallback_idx):
+        text = str(name)
+        if text.startswith("Bus_"):
+            try:
+                return int(text.split("_", 1)[1])
+            except (IndexError, ValueError):
+                pass
+        if text.isdigit():
+            return int(text)
+        return int(fallback_idx) + 1
+
+    def _build_bus_lookup(self, net):
+        return {
+            self._parse_bus_number(row["name"], idx): idx
+            for idx, row in net.bus.iterrows()
+        }
+
+    def _build_line_lookup(self, net):
+        lookup = {}
+        for idx, row in net.line.iterrows():
+            from_bus_idx = row["from_bus"]
+            to_bus_idx = row["to_bus"]
+            from_bus = self._parse_bus_number(net.bus.at[from_bus_idx, "name"], from_bus_idx)
+            to_bus = self._parse_bus_number(net.bus.at[to_bus_idx, "name"], to_bus_idx)
+            lookup[f"{from_bus}-{to_bus}"] = idx
+        return lookup
+
+    @classmethod
+    def from_client_name(cls, client_name: str, station_bus_map=None, compute_thevenin=True):
+        from env.grid_variants import build_grid_variant
+
+        return cls(
+            station_bus_map=station_bus_map,
+            compute_thevenin=compute_thevenin,
+            client_name=client_name,
+            net=build_grid_variant(client_name),
+        )
+
     def _net_with_loads(self, loads):
         net = copy.deepcopy(self.base_net)
         for power_node, load_kw in loads.items():
@@ -230,7 +269,7 @@ class PPPowerGrid33:
         self.bus_voltages = {}
         self.voltage_violations = []
         for bus_idx, row in self.net.res_bus.iterrows():
-            bus_num = int(self.net.bus.at[bus_idx, "name"].split("_")[1])
+            bus_num = self._parse_bus_number(self.net.bus.at[bus_idx, "name"], bus_idx)
             key = f"Bus_{bus_num}"
             vm_pu = float(row.vm_pu)
             self.bus_voltages[key] = round(vm_pu, 6)
@@ -239,7 +278,16 @@ class PPPowerGrid33:
 
         self.line_losses = {}
         for line_idx, row in self.net.res_line.iterrows():
-            line_name = self.net.line.at[line_idx, "name"].replace("Line_", "").replace("_", "-")
+            line_obj = self.net.line.at[line_idx, "name"] if "name" in self.net.line.columns else None
+            if isinstance(line_obj, str) and line_obj:
+                line_name = line_obj.replace("Line_", "").replace("_", "-")
+            else:
+                line_row = self.net.line.loc[line_idx]
+                from_bus_idx = line_row["from_bus"]
+                to_bus_idx = line_row["to_bus"]
+                from_bus = self._parse_bus_number(self.net.bus.at[from_bus_idx, "name"], from_bus_idx)
+                to_bus = self._parse_bus_number(self.net.bus.at[to_bus_idx, "name"], to_bus_idx)
+                line_name = f"Bus_{from_bus}-Bus_{to_bus}"
             self.line_losses[line_name] = round(float(row.pl_mw) * 1000.0, 6)
         self.total_loss = float(self.net.res_line.pl_mw.sum() * 1000.0)
         return self.bus_voltages
@@ -297,7 +345,7 @@ class PPPowerGrid33:
             return None
         lmp = {}
         for bus_idx, row in net.res_bus.iterrows():
-            bus_num = int(self.net.bus.at[bus_idx, "name"].split("_")[1])
+            bus_num = self._parse_bus_number(self.net.bus.at[bus_idx, "name"], bus_idx)
             lmp[bus_num] = float(row.lam_p) / 1000.0
         return lmp
 

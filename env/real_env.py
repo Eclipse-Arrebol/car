@@ -44,6 +44,7 @@ class RealTrafficEnv(TrafficPowerEnv):
         station_node_ids: list = None,
         respawn_after_full_charge: bool = True,
         num_chargers_per_station: int = 4,
+        client_name: str = "base",
         background_ue_net_tntp: Optional[str] = None,
         background_ue_trips_tntp: Optional[str] = None,
         background_ue_scale: float = 1.0,
@@ -53,6 +54,7 @@ class RealTrafficEnv(TrafficPowerEnv):
     ):
         self.respawn_after_full_charge = respawn_after_full_charge
         self.num_chargers_per_station = max(1, int(num_chargers_per_station))
+        self.client_name = client_name
         self.background_ue_net_tntp = background_ue_net_tntp
         self.background_ue_trips_tntp = background_ue_trips_tntp
         self.background_ue_scale = float(background_ue_scale)
@@ -93,11 +95,21 @@ class RealTrafficEnv(TrafficPowerEnv):
         self.station_node_ids = station_nodes
         self.num_stations = num_stations
 
-        self.power_grid = PPPowerGrid33(
-            station_bus_map={
-                i: IEEE33_STATION_BUSES[i]
-                for i in range(num_stations)
-            }
+        self.power_grid = (
+            PPPowerGrid33.from_client_name(
+                self.client_name,
+                station_bus_map={
+                    i: IEEE33_STATION_BUSES[i]
+                    for i in range(num_stations)
+                },
+            )
+            if self.client_name != "base"
+            else PPPowerGrid33(
+                station_bus_map={
+                    i: IEEE33_STATION_BUSES[i]
+                    for i in range(num_stations)
+                }
+            )
         )
         self.stations = self._build_charging_stations(station_nodes)
 
@@ -135,11 +147,21 @@ class RealTrafficEnv(TrafficPowerEnv):
 
     def reset(self):
         self._reset_mask_stats_and_print()
-        self.power_grid = PPPowerGrid33(
-            station_bus_map={
-                i: IEEE33_STATION_BUSES[i]
-                for i in range(self.num_stations)
-            }
+        self.power_grid = (
+            PPPowerGrid33.from_client_name(
+                self.client_name,
+                station_bus_map={
+                    i: IEEE33_STATION_BUSES[i]
+                    for i in range(self.num_stations)
+                },
+            )
+            if self.client_name != "base"
+            else PPPowerGrid33(
+                station_bus_map={
+                    i: IEEE33_STATION_BUSES[i]
+                    for i in range(self.num_stations)
+                }
+            )
         )
         self.stations = self._build_charging_stations(self.station_node_ids)
         setup_background_traffic_and_respawn_nodes(self)
