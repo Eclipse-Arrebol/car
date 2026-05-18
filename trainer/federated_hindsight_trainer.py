@@ -2,11 +2,12 @@ from __future__ import annotations
 
 """Federated training utilities built on top of the hindsight training stack.
 
-This module keeps the first implementation intentionally small:
+This first implementation keeps the system intentionally small and practical:
 - each client owns its own `RealTrafficEnv`
 - each client owns its own `HindsightDQNAgent`
 - local training reuses `HindsightTrainer.step_episode()`
 - server aggregation performs simple FedAvg over policy-network weights
+- optional multiprocessing accelerates the per-client local rollout stage
 
 The module is designed as a bridge from single-client training (`train_hindsight.py`)
 to a future full FL pipeline.
@@ -18,6 +19,7 @@ from typing import Dict, List, Sequence, Tuple
 import copy
 import os
 import multiprocessing as mp
+from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 
 import torch
@@ -57,13 +59,21 @@ class ClientRoundResult:
     client_name: str
     state_dict: Dict[str, torch.Tensor]
     metrics: Dict[str, float]
+    memory: list
 
 
-def _run_client_round(cfg: FederatedClientConfig) -> ClientRoundResult:
-    """Execute one local training round for a single client.
+def _serialize_memory(memory: deque) -> list:
+    return list(memory)
 
-    This function is top-level so it can be used with multiprocessing on Windows.
-    """
+
+def _deserialize_memory(memory_list: list | None, maxlen: int) -> deque:
+    if memory_list is None:
+        return deque(maxlen=maxlen)
+    return deque(memory_list, maxlen=maxlen)
+
+
+def _run_client_round(cfg: FederatedClientConfig, prior_memory: list | None = None) -> ClientRoundResult:
+    """Execute one local training round for a single client."""
 
     env = RealTrafficEnv(
         graphml_file=cfg.graphml_file,
@@ -86,6 +96,7 @@ def _run_client_round(cfg: FederatedClientConfig) -> ClientRoundResult:
         use_action_mask=cfg.use_action_mask,
     )
     trainer = HindsightTrainer(env, agent)
+    agent.memory = _deserialize_memory(prior_memory, agent.memory.maxlen)
 
     try:
         env.reset()
@@ -128,7 +139,7 @@ def _run_client_round(cfg: FederatedClientConfig) -> ClientRoundResult:
             key: value.detach().cpu().clone()
             for key, value in agent.policy_net.state_dict().items()
         }
-        return ClientRoundResult(cfg.client_name, state_dict, metrics)
+        return ClientRoundResult(cfg.client_name, state_dict, metrics, _serialize_memory(agent.memory))
     finally:
         del trainer
         del agent
@@ -146,6 +157,7 @@ class FederatedHindsightTrainer:
         self.client_configs = list(client_configs)
         self.parallel = bool(parallel)
         self.clients: list[FederatedClient] = [self._build_client(cfg) for cfg in self.client_configs]
+        self.client_memory_cache: dict[str, list] = {cfg.client_name: [] for cfg in self.client_configs}
 
     def _build_client(self, cfg: FederatedClientConfig) -> FederatedClient:
         env = RealTrafficEnv(
@@ -195,22 +207,27 @@ class FederatedHindsightTrainer:
         client_states = []
         metrics: Dict[str, Dict[str, float]] = {}
         for client in self.clients:
-            result = _run_client_round(client.config)
+            result = _run_client_round(client.config, self.client_memory_cache.get(client.config.client_name))
             client_states.append(result.state_dict)
             metrics[result.client_name] = result.metrics
+            self.client_memory_cache[result.client_name] = result.memory
+            client.agent.memory = _deserialize_memory(result.memory, client.agent.memory.maxlen)
         return client_states, metrics
 
     def _train_round_parallel(self) -> Tuple[List[Dict[str, torch.Tensor]], Dict[str, Dict[str, float]]]:
         client_states = []
         metrics: Dict[str, Dict[str, float]] = {}
-        # Force spawn so CUDA can be initialized safely inside subprocesses on Linux/Windows.
         ctx = mp.get_context("spawn")
+        futures = []
         with ProcessPoolExecutor(max_workers=len(self.client_configs), mp_context=ctx) as pool:
-            futures = [pool.submit(_run_client_round, cfg) for cfg in self.client_configs]
-            for fut in futures:
+            for client in self.clients:
+                futures.append((client, pool.submit(_run_client_round, client.config, self.client_memory_cache.get(client.config.client_name))))
+            for client, fut in futures:
                 result = fut.result()
                 client_states.append(result.state_dict)
                 metrics[result.client_name] = result.metrics
+                self.client_memory_cache[result.client_name] = result.memory
+                client.agent.memory = _deserialize_memory(result.memory, client.agent.memory.maxlen)
         return client_states, metrics
 
     def train_round(self) -> Dict[str, Dict[str, float]]:
