@@ -87,43 +87,54 @@ def _run_client_round(cfg: FederatedClientConfig) -> ClientRoundResult:
     )
     trainer = HindsightTrainer(env, agent)
 
-    env.reset()
-    trainer.pending.clear()
-    trainer._current_step = 0
+    try:
+        env.reset()
+        trainer.pending.clear()
+        trainer._current_step = 0
 
-    ep_trip: list[float] = []
-    ep_queue: list[float] = []
-    ep_fee: list[float] = []
-    ep_reward: list[float] = []
+        ep_trip: list[float] = []
+        ep_queue: list[float] = []
+        ep_fee: list[float] = []
+        ep_reward: list[float] = []
 
-    for _step in range(cfg.steps_per_episode):
-        done, info = trainer.step_episode()
+        for _step in range(cfg.steps_per_episode):
+            done, info = trainer.step_episode()
 
-        for entry in info.get("completed", []):
-            trip = float(entry.get("actual_trip_time_h", 0.0))
-            queue = float(entry.get("actual_queue_time_h", 0.0))
-            fee = float(entry.get("charging_fee", 0.0))
-            reward = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
-            ep_trip.append(trip)
-            ep_queue.append(queue)
-            ep_fee.append(fee)
-            ep_reward.append(reward)
+            for entry in info.get("completed", []):
+                trip = float(entry.get("actual_trip_time_h", 0.0))
+                queue = float(entry.get("actual_queue_time_h", 0.0))
+                fee = float(entry.get("charging_fee", 0.0))
+                reward = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
+                ep_trip.append(trip)
+                ep_queue.append(queue)
+                ep_fee.append(fee)
+                ep_reward.append(reward)
 
-        if len(agent.memory) >= cfg.batch_size:
-            agent.replay(cfg.batch_size)
+            if len(agent.memory) >= cfg.batch_size:
+                agent.replay(cfg.batch_size)
 
-        if done:
-            break
+            if done:
+                break
 
-    metrics = {
-        "episodes": 1.0,
-        "memory_size": float(len(agent.memory)),
-        "avg_trip_h": float(sum(ep_trip) / len(ep_trip)) if ep_trip else 0.0,
-        "avg_queue_h": float(sum(ep_queue) / len(ep_queue)) if ep_queue else 0.0,
-        "avg_fee": float(sum(ep_fee) / len(ep_fee)) if ep_fee else 0.0,
-        "avg_reward": float(sum(ep_reward) / len(ep_reward)) if ep_reward else 0.0,
-    }
-    return ClientRoundResult(cfg.client_name, copy.deepcopy(agent.policy_net.state_dict()), metrics)
+        metrics = {
+            "episodes": 1.0,
+            "memory_size": float(len(agent.memory)),
+            "avg_trip_h": float(sum(ep_trip) / len(ep_trip)) if ep_trip else 0.0,
+            "avg_queue_h": float(sum(ep_queue) / len(ep_queue)) if ep_queue else 0.0,
+            "avg_fee": float(sum(ep_fee) / len(ep_fee)) if ep_fee else 0.0,
+            "avg_reward": float(sum(ep_reward) / len(ep_reward)) if ep_reward else 0.0,
+        }
+        state_dict = {
+            key: value.detach().cpu().clone()
+            for key, value in agent.policy_net.state_dict().items()
+        }
+        return ClientRoundResult(cfg.client_name, state_dict, metrics)
+    finally:
+        del trainer
+        del agent
+        del env
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 class FederatedHindsightTrainer:
