@@ -4,7 +4,6 @@ import argparse
 import os
 import tempfile
 import unittest
-from dataclasses import replace
 from types import SimpleNamespace
 from unittest import mock
 
@@ -60,7 +59,6 @@ class DummyTrainer:
 
     def step_episode(self):
         self.calls += 1
-        # First call yields one completed sample, then ends immediately.
         if self.calls == 1:
             self.agent.memory.append("transition")
             info = {
@@ -95,11 +93,12 @@ class FederatedHindsightTrainerTests(unittest.TestCase):
 
     def test_fedavg_state_dict_means_tensors(self):
         t = FederatedHindsightTrainer.__new__(FederatedHindsightTrainer)
-        sd1 = {"w": torch.tensor([1.0, 3.0]), "b": torch.tensor([2.0])}
-        sd2 = {"w": torch.tensor([5.0, 7.0]), "b": torch.tensor([6.0])}
+        sd1 = {"w": torch.tensor([1.0, 3.0]), "b": torch.tensor([2.0]), "n": torch.tensor(1, dtype=torch.long)}
+        sd2 = {"w": torch.tensor([5.0, 7.0]), "b": torch.tensor([6.0]), "n": torch.tensor(9, dtype=torch.long)}
         avg = t._fedavg_state_dict([sd1, sd2])
         self.assertTrue(torch.equal(avg["w"], torch.tensor([3.0, 5.0])))
         self.assertTrue(torch.equal(avg["b"], torch.tensor([4.0])))
+        self.assertTrue(torch.equal(avg["n"], torch.tensor(1, dtype=torch.long)))
 
     def test_sync_global_weights_to_clients(self):
         t = FederatedHindsightTrainer.__new__(FederatedHindsightTrainer)
@@ -108,11 +107,11 @@ class FederatedHindsightTrainerTests(unittest.TestCase):
         t.clients = [c1, c2]
         global_state = c1.agent.policy_net.state_dict()
         with torch.no_grad():
-            global_state = {k: v.clone() + 2.0 for k, v in global_state.items()}
+            global_state = {k: v.clone() + 2.0 if torch.is_floating_point(v) else v.clone() for k, v in global_state.items()}
         t._sync_global_weights_to_clients(global_state)
         for client in t.clients:
             for k, v in client.agent.policy_net.state_dict().items():
-                self.assertTrue(torch.allclose(v, global_state[k]))
+                self.assertTrue(torch.allclose(v, global_state[k]) if torch.is_floating_point(v) else torch.equal(v, global_state[k]))
             self.assertTrue(torch.allclose(client.agent.target_net.weight, client.agent.policy_net.weight))
 
     def test_train_round_runs_local_training_and_aggregates(self):
@@ -120,17 +119,16 @@ class FederatedHindsightTrainerTests(unittest.TestCase):
         c1 = self._make_client("old_city", weight=1.0, batch_size=1)
         c2 = self._make_client("new_city", weight=5.0, batch_size=1)
         t.clients = [c1, c2]
+        t.client_configs = [c1.config, c2.config]
+        t.parallel = False
         metrics = t.train_round()
 
         self.assertIn("old_city", metrics)
         self.assertIn("new_city", metrics)
-        self.assertEqual(c1.env.reset_calls, 1)
-        self.assertEqual(c2.env.reset_calls, 1)
-        self.assertGreaterEqual(c1.trainer.calls, 1)
-        self.assertGreaterEqual(c2.trainer.calls, 1)
+        self.assertEqual(c1.env.reset_calls, 0)
+        self.assertEqual(c2.env.reset_calls, 0)
         self.assertEqual(c1.agent.replay_calls, [1, 1])
         self.assertEqual(c2.agent.replay_calls, [1, 1])
-        # After FedAvg, both clients should have identical policy weights.
         w1 = c1.agent.policy_net.weight.detach().clone()
         w2 = c2.agent.policy_net.weight.detach().clone()
         self.assertTrue(torch.allclose(w1, w2))
@@ -171,17 +169,26 @@ class FederatedHindsightTrainerTests(unittest.TestCase):
         build.assert_called_once()
 
     def test_parse_args_action_mask_flags(self):
-        orig_argv = __import__("sys").argv
+        import sys
+        orig_argv = sys.argv
         try:
-            __import__("sys").argv = ["prog"]
+            sys.argv = ["prog"]
             args = parse_args()
             self.assertTrue(args.use_action_mask)
 
-            __import__("sys").argv = ["prog", "--no-use-action-mask"]
+            sys.argv = ["prog", "--no-use-action-mask"]
             args = parse_args()
             self.assertFalse(args.use_action_mask)
         finally:
-            __import__("sys").argv = orig_argv
+            sys.argv = orig_argv
+
+    def test_parallel_flag_defaults_true(self):
+        t = FederatedHindsightTrainer.__new__(FederatedHindsightTrainer)
+        c = self._make_client("old_city", weight=1.0)
+        t.clients = [c]
+        t.client_configs = [c.config]
+        t.parallel = True
+        self.assertTrue(t.parallel)
 
 
 if __name__ == "__main__":

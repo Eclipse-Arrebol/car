@@ -53,6 +53,12 @@ def parse_args():
     p.add_argument("--save-every", type=int, default=1)
     p.add_argument("--network", type=str, default="station_only",
                    choices=["original", "lightweight", "station_only"])
+    p.add_argument(
+        "--serial",
+        action="store_true",
+        default=False,
+        help="Run clients sequentially instead of in parallel (debug mode)",
+    )
     mask_group = p.add_mutually_exclusive_group()
     mask_group.add_argument("--use-action-mask", dest="use_action_mask", action="store_true", default=True,
                             help="Enable action mask in the policy network (default: on)")
@@ -84,7 +90,7 @@ def main():
             )
         )
 
-    trainer = FederatedHindsightTrainer(client_configs)
+    trainer = FederatedHindsightTrainer(client_configs, parallel=not args.serial)
     os.makedirs(args.save_dir, exist_ok=True)
 
     print(

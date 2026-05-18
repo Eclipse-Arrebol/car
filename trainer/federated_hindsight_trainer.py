@@ -13,10 +13,11 @@ to a future full FL pipeline.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Sequence
+from typing import Dict, List, Sequence, Tuple
 
 import copy
 import os
+from concurrent.futures import ProcessPoolExecutor
 
 import torch
 
@@ -50,13 +51,88 @@ class FederatedClient:
     trainer: HindsightTrainer
 
 
+@dataclass
+class ClientRoundResult:
+    client_name: str
+    state_dict: Dict[str, torch.Tensor]
+    metrics: Dict[str, float]
+
+
+def _run_client_round(cfg: FederatedClientConfig) -> ClientRoundResult:
+    """Execute one local training round for a single client.
+
+    This function is top-level so it can be used with multiprocessing on Windows.
+    """
+
+    env = RealTrafficEnv(
+        graphml_file=cfg.graphml_file,
+        num_stations=cfg.num_stations,
+        num_evs=cfg.num_evs,
+        num_chargers_per_station=cfg.num_chargers_per_station,
+        max_nodes=cfg.max_nodes,
+        cache_dir=cfg.cache_dir,
+        seed=cfg.seed,
+        respawn_after_full_charge=cfg.respawn_after_full_charge,
+        client_name=cfg.client_name,
+    )
+    station_node_ids = [s.traffic_node_id for s in env.stations]
+    agent = HindsightDQNAgent(
+        num_features=18,
+        num_actions=cfg.num_stations,
+        station_node_ids=station_node_ids,
+        num_nodes_per_graph=env.num_nodes,
+        network_variant=cfg.network_variant,
+        use_action_mask=cfg.use_action_mask,
+    )
+    trainer = HindsightTrainer(env, agent)
+
+    env.reset()
+    trainer.pending.clear()
+    trainer._current_step = 0
+
+    ep_trip: list[float] = []
+    ep_queue: list[float] = []
+    ep_fee: list[float] = []
+    ep_reward: list[float] = []
+
+    for _step in range(cfg.steps_per_episode):
+        done, info = trainer.step_episode()
+
+        for entry in info.get("completed", []):
+            trip = float(entry.get("actual_trip_time_h", 0.0))
+            queue = float(entry.get("actual_queue_time_h", 0.0))
+            fee = float(entry.get("charging_fee", 0.0))
+            reward = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
+            ep_trip.append(trip)
+            ep_queue.append(queue)
+            ep_fee.append(fee)
+            ep_reward.append(reward)
+
+        if len(agent.memory) >= cfg.batch_size:
+            agent.replay(cfg.batch_size)
+
+        if done:
+            break
+
+    metrics = {
+        "episodes": 1.0,
+        "memory_size": float(len(agent.memory)),
+        "avg_trip_h": float(sum(ep_trip) / len(ep_trip)) if ep_trip else 0.0,
+        "avg_queue_h": float(sum(ep_queue) / len(ep_queue)) if ep_queue else 0.0,
+        "avg_fee": float(sum(ep_fee) / len(ep_fee)) if ep_fee else 0.0,
+        "avg_reward": float(sum(ep_reward) / len(ep_reward)) if ep_reward else 0.0,
+    }
+    return ClientRoundResult(cfg.client_name, copy.deepcopy(agent.policy_net.state_dict()), metrics)
+
+
 class FederatedHindsightTrainer:
     """Minimal FedAvg trainer for multiple client-specific EMA power grids."""
 
-    def __init__(self, client_configs: Sequence[FederatedClientConfig]):
+    def __init__(self, client_configs: Sequence[FederatedClientConfig], parallel: bool = True):
         if not client_configs:
             raise ValueError("client_configs must not be empty")
         self.client_configs = list(client_configs)
+        self.parallel = bool(parallel)
         self.clients: list[FederatedClient] = [self._build_client(cfg) for cfg in self.client_configs]
 
     def _build_client(self, cfg: FederatedClientConfig) -> FederatedClient:
@@ -103,54 +179,33 @@ class FederatedHindsightTrainer:
             client.agent.policy_net.load_state_dict(global_state, strict=False)
             client.agent.target_net.load_state_dict(client.agent.policy_net.state_dict())
 
-    def train_round(self) -> Dict[str, Dict[str, float]]:
-        """Run one local-training round on every client and aggregate with FedAvg."""
+    def _train_round_serial(self) -> Tuple[List[Dict[str, torch.Tensor]], Dict[str, Dict[str, float]]]:
         client_states = []
         metrics: Dict[str, Dict[str, float]] = {}
-
         for client in self.clients:
-            env = client.env
-            agent = client.agent
-            trainer = client.trainer
-            cfg = client.config
+            result = _run_client_round(client.config)
+            client_states.append(result.state_dict)
+            metrics[result.client_name] = result.metrics
+        return client_states, metrics
 
-            env.reset()
-            trainer.pending.clear()
-            trainer._current_step = 0
+    def _train_round_parallel(self) -> Tuple[List[Dict[str, torch.Tensor]], Dict[str, Dict[str, float]]]:
+        client_states = []
+        metrics: Dict[str, Dict[str, float]] = {}
+        # On Windows, ProcessPoolExecutor uses spawn; keep the worker top-level and picklable.
+        with ProcessPoolExecutor(max_workers=len(self.client_configs)) as pool:
+            futures = [pool.submit(_run_client_round, cfg) for cfg in self.client_configs]
+            for fut in futures:
+                result = fut.result()
+                client_states.append(result.state_dict)
+                metrics[result.client_name] = result.metrics
+        return client_states, metrics
 
-            ep_trip: list[float] = []
-            ep_queue: list[float] = []
-            ep_fee: list[float] = []
-            ep_reward: list[float] = []
-
-            for _step in range(cfg.steps_per_episode):
-                done, info = trainer.step_episode()
-
-                for entry in info.get("completed", []):
-                    trip = float(entry.get("actual_trip_time_h", 0.0))
-                    queue = float(entry.get("actual_queue_time_h", 0.0))
-                    fee = float(entry.get("charging_fee", 0.0))
-                    reward = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
-                    ep_trip.append(trip)
-                    ep_queue.append(queue)
-                    ep_fee.append(fee)
-                    ep_reward.append(reward)
-
-                if len(agent.memory) >= cfg.batch_size:
-                    agent.replay(cfg.batch_size)
-
-                if done:
-                    break
-
-            client_states.append(copy.deepcopy(agent.policy_net.state_dict()))
-            metrics[cfg.client_name] = {
-                "episodes": 1.0,
-                "memory_size": float(len(agent.memory)),
-                "avg_trip_h": float(sum(ep_trip) / len(ep_trip)) if ep_trip else 0.0,
-                "avg_queue_h": float(sum(ep_queue) / len(ep_queue)) if ep_queue else 0.0,
-                "avg_fee": float(sum(ep_fee) / len(ep_fee)) if ep_fee else 0.0,
-                "avg_reward": float(sum(ep_reward) / len(ep_reward)) if ep_reward else 0.0,
-            }
+    def train_round(self) -> Dict[str, Dict[str, float]]:
+        """Run one local-training round on every client and aggregate with FedAvg."""
+        if self.parallel and len(self.client_configs) > 1:
+            client_states, metrics = self._train_round_parallel()
+        else:
+            client_states, metrics = self._train_round_serial()
 
         global_state = self._fedavg_state_dict(client_states)
         self._sync_global_weights_to_clients(global_state)
