@@ -9,19 +9,19 @@ rounds. The main process only coordinates:
 - requesting one local round from each client
 - averaging returned weights with FedAvg
 
-That avoids re-loading the road network and re-creating `RealTrafficEnv`
-for every round.
+The worker processes are created with the multiprocessing "spawn" context
+so CUDA can be initialized safely on Linux/Windows.
 """
 
+from collections import deque
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from multiprocessing import get_context
+from multiprocessing.connection import Connection
 from typing import Dict, List, Sequence, Tuple
 
-import copy
 import os
-import multiprocessing as mp
-from collections import deque
-from multiprocessing.connection import Connection
-
+import queue
 import torch
 
 from agents.hindsight_dqn_agent import HindsightDQNAgent
@@ -76,60 +76,58 @@ class WorkerCommand:
     payload: dict | None = None
 
 
-class _PersistentClientWorker(mp.Process):
-    def __init__(self, cfg: FederatedClientConfig, conn: Connection):
-        super().__init__(daemon=True)
-        self.cfg = cfg
-        self.conn = conn
+def _serialize_memory(memory: deque) -> list:
+    return list(memory)
 
-    def _build_runtime(self):
-        env = RealTrafficEnv(
-            graphml_file=self.cfg.graphml_file,
-            num_stations=self.cfg.num_stations,
-            num_evs=self.cfg.num_evs,
-            num_chargers_per_station=self.cfg.num_chargers_per_station,
-            max_nodes=self.cfg.max_nodes,
-            cache_dir=self.cfg.cache_dir,
-            seed=self.cfg.seed,
-            respawn_after_full_charge=self.cfg.respawn_after_full_charge,
-            client_name=self.cfg.client_name,
-        )
-        station_node_ids = [s.traffic_node_id for s in env.stations]
-        agent = HindsightDQNAgent(
-            num_features=18,
-            num_actions=self.cfg.num_stations,
-            station_node_ids=station_node_ids,
-            num_nodes_per_graph=env.num_nodes,
-            network_variant=self.cfg.network_variant,
-            use_action_mask=self.cfg.use_action_mask,
-        )
-        trainer = HindsightTrainer(env, agent)
-        return env, agent, trainer
 
-    @staticmethod
-    def _serialize_memory(memory: deque) -> list:
-        return list(memory)
+def _deserialize_memory(memory_list: list | None, maxlen: int) -> deque:
+    if memory_list is None:
+        return deque(maxlen=maxlen)
+    return deque(memory_list, maxlen=maxlen)
 
-    @staticmethod
-    def _deserialize_memory(memory_list: list | None, maxlen: int) -> deque:
-        if memory_list is None:
-            return deque(maxlen=maxlen)
-        return deque(memory_list, maxlen=maxlen)
 
-    @staticmethod
-    def _cpu_state_dict(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        return {k: v.detach().cpu().clone() for k, v in state_dict.items()}
+def _cpu_state_dict(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    return {k: v.detach().cpu().clone() for k, v in state_dict.items()}
 
-    def _run_local_round(
-        self,
-        env: RealTrafficEnv,
-        agent: HindsightDQNAgent,
-        trainer: HindsightTrainer,
-        batch_size: int,
-        steps_per_episode: int,
-        initial_memory: list | None,
-    ) -> WorkerResponse:
-        agent.memory = self._deserialize_memory(initial_memory, agent.memory.maxlen)
+
+def _build_runtime(cfg: FederatedClientConfig):
+    env = RealTrafficEnv(
+        graphml_file=cfg.graphml_file,
+        num_stations=cfg.num_stations,
+        num_evs=cfg.num_evs,
+        num_chargers_per_station=cfg.num_chargers_per_station,
+        max_nodes=cfg.max_nodes,
+        cache_dir=cfg.cache_dir,
+        seed=cfg.seed,
+        respawn_after_full_charge=cfg.respawn_after_full_charge,
+        client_name=cfg.client_name,
+    )
+    station_node_ids = [s.traffic_node_id for s in env.stations]
+    agent = HindsightDQNAgent(
+        num_features=18,
+        num_actions=cfg.num_stations,
+        station_node_ids=station_node_ids,
+        num_nodes_per_graph=env.num_nodes,
+        network_variant=cfg.network_variant,
+        use_action_mask=cfg.use_action_mask,
+    )
+    trainer = HindsightTrainer(env, agent)
+    return env, agent, trainer
+
+
+def _run_local_round(
+    cfg: FederatedClientConfig,
+    global_state: Dict[str, torch.Tensor] | None,
+    prior_memory: list | None,
+) -> WorkerResponse:
+    env, agent, trainer = _build_runtime(cfg)
+    agent.memory = _deserialize_memory(prior_memory, agent.memory.maxlen)
+
+    try:
+        if global_state is not None:
+            agent.policy_net.load_state_dict(global_state, strict=False)
+            agent.target_net.load_state_dict(agent.policy_net.state_dict())
+
         env.reset()
         trainer.pending.clear()
         trainer._current_step = 0
@@ -139,7 +137,7 @@ class _PersistentClientWorker(mp.Process):
         ep_fee: list[float] = []
         ep_reward: list[float] = []
 
-        for _step in range(steps_per_episode):
+        for _step in range(cfg.steps_per_episode):
             done, info = trainer.step_episode()
 
             for entry in info.get("completed", []):
@@ -152,8 +150,8 @@ class _PersistentClientWorker(mp.Process):
                 ep_fee.append(fee)
                 ep_reward.append(reward)
 
-            if len(agent.memory) >= batch_size:
-                agent.replay(batch_size)
+            if len(agent.memory) >= cfg.batch_size:
+                agent.replay(cfg.batch_size)
 
             if done:
                 break
@@ -167,16 +165,28 @@ class _PersistentClientWorker(mp.Process):
             "avg_reward": float(sum(ep_reward) / len(ep_reward)) if ep_reward else 0.0,
         }
         return WorkerResponse(
-            client_name=self.cfg.client_name,
-            state_dict=self._cpu_state_dict(agent.policy_net.state_dict()),
+            client_name=cfg.client_name,
+            state_dict=_cpu_state_dict(agent.policy_net.state_dict()),
             metrics=metrics,
-            memory=self._serialize_memory(agent.memory),
+            memory=_serialize_memory(agent.memory),
         )
+    finally:
+        del trainer
+        del agent
+        del env
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
+class _PersistentClientWorker:
+    def __init__(self, cfg: FederatedClientConfig, conn: Connection):
+        self.cfg = cfg
+        self.conn = conn
 
     def run(self):
         env = agent = trainer = None
         try:
-            env, agent, trainer = self._build_runtime()
+            env, agent, trainer = _build_runtime(self.cfg)
             while True:
                 cmd: WorkerCommand = self.conn.recv()
                 if cmd.kind == "stop":
@@ -184,18 +194,54 @@ class _PersistentClientWorker(mp.Process):
                     break
                 if cmd.kind == "round":
                     payload = cmd.payload or {}
-                    if "global_state" in payload and payload["global_state"] is not None:
+                    if payload.get("global_state") is not None:
                         agent.policy_net.load_state_dict(payload["global_state"], strict=False)
                         agent.target_net.load_state_dict(agent.policy_net.state_dict())
-                    resp = self._run_local_round(
-                        env=env,
-                        agent=agent,
-                        trainer=trainer,
-                        batch_size=int(payload.get("batch_size", 64)),
-                        steps_per_episode=int(payload.get("steps_per_episode", 100)),
-                        initial_memory=payload.get("memory"),
+                    agent.memory = _deserialize_memory(payload.get("memory"), agent.memory.maxlen)
+                    env.reset()
+                    trainer.pending.clear()
+                    trainer._current_step = 0
+
+                    ep_trip: list[float] = []
+                    ep_queue: list[float] = []
+                    ep_fee: list[float] = []
+                    ep_reward: list[float] = []
+
+                    steps_per_episode = int(payload.get("steps_per_episode", self.cfg.steps_per_episode))
+                    batch_size = int(payload.get("batch_size", self.cfg.batch_size))
+
+                    for _step in range(steps_per_episode):
+                        done, info = trainer.step_episode()
+                        for entry in info.get("completed", []):
+                            trip = float(entry.get("actual_trip_time_h", 0.0))
+                            queue = float(entry.get("actual_queue_time_h", 0.0))
+                            fee = float(entry.get("charging_fee", 0.0))
+                            reward = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
+                            ep_trip.append(trip)
+                            ep_queue.append(queue)
+                            ep_fee.append(fee)
+                            ep_reward.append(reward)
+                        if len(agent.memory) >= batch_size:
+                            agent.replay(batch_size)
+                        if done:
+                            break
+
+                    metrics = {
+                        "episodes": 1.0,
+                        "memory_size": float(len(agent.memory)),
+                        "avg_trip_h": float(sum(ep_trip) / len(ep_trip)) if ep_trip else 0.0,
+                        "avg_queue_h": float(sum(ep_queue) / len(ep_queue)) if ep_queue else 0.0,
+                        "avg_fee": float(sum(ep_fee) / len(ep_fee)) if ep_fee else 0.0,
+                        "avg_reward": float(sum(ep_reward) / len(ep_reward)) if ep_reward else 0.0,
+                    }
+                    self.conn.send(
+                        WorkerResponse(
+                            client_name=self.cfg.client_name,
+                            state_dict=_cpu_state_dict(agent.policy_net.state_dict()),
+                            metrics=metrics,
+                            memory=_serialize_memory(agent.memory),
+                        )
                     )
-                    self.conn.send(resp)
                     continue
                 raise ValueError(f"Unknown command kind: {cmd.kind!r}")
         finally:
@@ -208,6 +254,10 @@ class _PersistentClientWorker(mp.Process):
                 del env
 
 
+def _persistent_worker_entry(cfg: FederatedClientConfig, conn: Connection):
+    _PersistentClientWorker(cfg, conn).run()
+
+
 class FederatedHindsightTrainer:
     """Minimal FedAvg trainer for multiple client-specific EMA power grids."""
 
@@ -218,7 +268,7 @@ class FederatedHindsightTrainer:
         self.parallel = bool(parallel)
         self.clients: list[FederatedClient] = [self._build_client(cfg) for cfg in self.client_configs]
         self.client_memory_cache: dict[str, list] = {cfg.client_name: [] for cfg in self.client_configs}
-        self._workers: dict[str, _PersistentClientWorker] = {}
+        self._workers: dict[str, mp.Process] = {}
         self._worker_conns: dict[str, Connection] = {}
         if self.parallel and len(self.client_configs) > 1:
             self._start_workers()
@@ -248,12 +298,12 @@ class FederatedHindsightTrainer:
         return FederatedClient(cfg, env, agent, trainer)
 
     def _start_workers(self) -> None:
-        ctx = mp.get_context("spawn")
+        ctx = get_context("spawn")
         for cfg in self.client_configs:
             parent_conn, child_conn = ctx.Pipe()
-            worker = _PersistentClientWorker(cfg, child_conn)
-            worker.start()
-            self._workers[cfg.client_name] = worker
+            proc = ctx.Process(target=_persistent_worker_entry, args=(cfg, child_conn), daemon=True)
+            proc.start()
+            self._workers[cfg.client_name] = proc
             self._worker_conns[cfg.client_name] = parent_conn
 
     def _stop_workers(self) -> None:
@@ -306,58 +356,14 @@ class FederatedHindsightTrainer:
         client_states = []
         metrics: Dict[str, Dict[str, float]] = {}
         for client in self.clients:
-            result = self._run_local_round_local_process(client)
+            result = _run_local_round(client.config, client.agent.policy_net.state_dict(), self.client_memory_cache.get(client.config.client_name))
             client_states.append(result.state_dict)
             metrics[result.client_name] = result.metrics
             self.client_memory_cache[result.client_name] = result.memory
             client.agent.memory = deque(result.memory, maxlen=client.agent.memory.maxlen)
         return client_states, metrics
 
-    def _run_local_round_local_process(self, client: FederatedClient) -> ClientRoundResult:
-        # Reuse the same code path as the persistent worker, but in-process.
-        worker = _PersistentClientWorker(client.config, conn=None)  # type: ignore[arg-type]
-        env = client.env
-        agent = client.agent
-        trainer = client.trainer
-        agent.memory = deque(self.client_memory_cache.get(client.config.client_name, []), maxlen=agent.memory.maxlen)
-        env.reset()
-        trainer.pending.clear()
-        trainer._current_step = 0
-
-        ep_trip: list[float] = []
-        ep_queue: list[float] = []
-        ep_fee: list[float] = []
-        ep_reward: list[float] = []
-
-        for _step in range(client.config.steps_per_episode):
-            done, info = trainer.step_episode()
-            for entry in info.get("completed", []):
-                trip = float(entry.get("actual_trip_time_h", 0.0))
-                queue = float(entry.get("actual_queue_time_h", 0.0))
-                fee = float(entry.get("charging_fee", 0.0))
-                reward = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
-                ep_trip.append(trip)
-                ep_queue.append(queue)
-                ep_fee.append(fee)
-                ep_reward.append(reward)
-            if len(agent.memory) >= client.config.batch_size:
-                agent.replay(client.config.batch_size)
-            if done:
-                break
-
-        metrics = {
-            "episodes": 1.0,
-            "memory_size": float(len(agent.memory)),
-            "avg_trip_h": float(sum(ep_trip) / len(ep_trip)) if ep_trip else 0.0,
-            "avg_queue_h": float(sum(ep_queue) / len(ep_queue)) if ep_queue else 0.0,
-            "avg_fee": float(sum(ep_fee) / len(ep_fee)) if ep_fee else 0.0,
-            "avg_reward": float(sum(ep_reward) / len(ep_reward)) if ep_reward else 0.0,
-        }
-        state_dict = {key: value.detach().cpu().clone() for key, value in agent.policy_net.state_dict().items()}
-        return ClientRoundResult(client.config.client_name, state_dict, metrics, list(agent.memory))
-
     def _train_round_parallel(self) -> Tuple[List[Dict[str, torch.Tensor]], Dict[str, Dict[str, float]]]:
-        # Persistent workers are already running; send them a round command and wait.
         client_states: list[Dict[str, torch.Tensor]] = []
         metrics: Dict[str, Dict[str, float]] = {}
         for client in self.clients:
@@ -375,7 +381,10 @@ class FederatedHindsightTrainer:
             )
         for client in self.clients:
             conn = self._worker_conns[client.config.client_name]
-            result: WorkerResponse = conn.recv()
+            try:
+                result: WorkerResponse = conn.recv()
+            except EOFError as exc:
+                raise RuntimeError(f"Worker for client {client.config.client_name} exited unexpectedly") from exc
             client_states.append(result.state_dict)
             metrics[result.client_name] = result.metrics
             self.client_memory_cache[result.client_name] = result.memory
