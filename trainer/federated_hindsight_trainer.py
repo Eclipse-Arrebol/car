@@ -17,6 +17,7 @@ from typing import Dict, List, Sequence, Tuple
 
 import copy
 import os
+import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 
 import torch
@@ -191,8 +192,9 @@ class FederatedHindsightTrainer:
     def _train_round_parallel(self) -> Tuple[List[Dict[str, torch.Tensor]], Dict[str, Dict[str, float]]]:
         client_states = []
         metrics: Dict[str, Dict[str, float]] = {}
-        # On Windows, ProcessPoolExecutor uses spawn; keep the worker top-level and picklable.
-        with ProcessPoolExecutor(max_workers=len(self.client_configs)) as pool:
+        # Force spawn so CUDA can be initialized safely inside subprocesses on Linux/Windows.
+        ctx = mp.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=len(self.client_configs), mp_context=ctx) as pool:
             futures = [pool.submit(_run_client_round, cfg) for cfg in self.client_configs]
             for fut in futures:
                 result = fut.result()
