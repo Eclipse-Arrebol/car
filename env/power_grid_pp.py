@@ -117,8 +117,8 @@ class PPPowerGrid33:
             for station_id, power_node in self.station_power_nodes.items()
             for bus in [self.station_bus_map[station_id]]
         }
-        self.base_net = copy.deepcopy(net) if net is not None else self._build_ieee33_net()
-        self.net = copy.deepcopy(self.base_net)
+        self.base_net = self._materialize_writable_net(net) if net is not None else self._build_ieee33_net()
+        self.net = self._materialize_writable_net(self.base_net)
         self.bus_lookup = self._build_bus_lookup(self.net)
         self.line_lookup = self._build_line_lookup(self.net)
 
@@ -134,6 +134,16 @@ class PPPowerGrid33:
             if PPPowerGrid33._THEVENIN_CACHE is None:
                 PPPowerGrid33._THEVENIN_CACHE = self._compute_thevenin_resistances()
             self.thevenin_r_ohm = dict(PPPowerGrid33._THEVENIN_CACHE)
+
+    @staticmethod
+    def _materialize_writable_net(net):
+        writable = copy.deepcopy(net)
+        for attr in ("bus", "line", "load", "sgen", "storage", "ext_grid", "poly_cost"):
+            if hasattr(writable, attr):
+                table = getattr(writable, attr)
+                if table is not None and hasattr(table, "copy"):
+                    setattr(writable, attr, table.copy(deep=True))
+        return writable
 
     @staticmethod
     def _build_ieee33_net():
@@ -255,7 +265,7 @@ class PPPowerGrid33:
 
     def _runpp(self, net):
         t0 = time.perf_counter()
-        safe_net = copy.deepcopy(net)
+        safe_net = self._materialize_writable_net(net)
         pp.runpp(safe_net, algorithm="bfsw", calculate_voltage_angles=False)
         elapsed = time.perf_counter() - t0
         self.runpp_call_count += 1
@@ -300,7 +310,7 @@ class PPPowerGrid33:
 
     def _compute_thevenin_resistances(self):
         result = {}
-        base_net = self._runpp(copy.deepcopy(self.base_net))
+        base_net = self._runpp(self.base_net)
         slack_v = self.v_nominal_kv * 1000.0
         perturb_mw = 1.0
 
