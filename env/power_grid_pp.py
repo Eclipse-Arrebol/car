@@ -227,7 +227,7 @@ class PPPowerGrid33:
                     bus=bus_map[row["bus"]],
                     p_mw=float(row.get("p_mw", 0.0)),
                     q_mvar=float(row.get("q_mvar", 0.0)),
-                    sn_mva=float(row.get("sn_mva", 0.0)) if not pp.isna(row.get("sn_mva", None)) else None,
+                    sn_mva=float(row.get("sn_mva", 0.0)) if row.get("sn_mva", None) is not None else None,
                     name=row.get("name", None),
                     controllable=bool(row.get("controllable", False)),
                     type=row.get("type", None),
