@@ -146,6 +146,135 @@ class PPPowerGrid33:
         return writable
 
     @staticmethod
+    def _copy_table_columns(src_table, dst_table, columns):
+        for col in columns:
+            if col in src_table.columns and col in dst_table.columns:
+                dst_table.loc[:, col] = src_table.loc[:, col].values
+
+    @classmethod
+    def _rebuild_clean_net_from_variant(cls, src_net):
+        """Recreate a client variant as a fresh pandapower net.
+
+        This avoids read-only views or cached table state inherited from
+        `case33bw()` or previous transformations while preserving the
+        variant topology and device parameters.
+        """
+
+        clean = pp.create_empty_network(sn_mva=float(getattr(src_net, "sn_mva", 10.0)))
+        bus_map = {}
+        for _, row in src_net.bus.iterrows():
+            bus_idx = pp.create_bus(
+                clean,
+                vn_kv=float(row.get("vn_kv", 12.66)),
+                name=str(row.get("name", "")),
+                type=row.get("type", "b"),
+                zone=row.get("zone", None),
+                in_service=bool(row.get("in_service", True)),
+            )
+            bus_map[_] = bus_idx
+
+        for _, row in src_net.ext_grid.iterrows():
+            ext_idx = pp.create_ext_grid(
+                clean,
+                bus=bus_map[row["bus"]],
+                vm_pu=float(row.get("vm_pu", 1.0)),
+                va_degree=float(row.get("va_degree", 0.0)),
+                name=row.get("name", None),
+                in_service=bool(row.get("in_service", True)),
+            )
+            for col in ("slack_weight", "max_p_mw", "min_p_mw", "max_q_mvar", "min_q_mvar"):
+                if col in src_net.ext_grid.columns and col in clean.ext_grid.columns:
+                    clean.ext_grid.at[ext_idx, col] = row[col]
+
+        for _, row in src_net.line.iterrows():
+            line_idx = pp.create_line_from_parameters(
+                clean,
+                from_bus=bus_map[row["from_bus"]],
+                to_bus=bus_map[row["to_bus"]],
+                length_km=float(row.get("length_km", 1.0)),
+                r_ohm_per_km=float(row.get("r_ohm_per_km", 0.0)),
+                x_ohm_per_km=float(row.get("x_ohm_per_km", 0.0)),
+                c_nf_per_km=float(row.get("c_nf_per_km", 0.0)),
+                max_i_ka=float(row.get("max_i_ka", 0.4)),
+                name=row.get("name", None),
+                type=row.get("type", "ol"),
+                in_service=bool(row.get("in_service", True)),
+            )
+            for col in ("df", "parallel", "g_us_per_km", "endtemp_degree", "alpha", "temperature_degree_celsius"):
+                if col in src_net.line.columns and col in clean.line.columns:
+                    clean.line.at[line_idx, col] = row[col]
+
+        if len(getattr(src_net, "load", [])):
+            for _, row in src_net.load.iterrows():
+                load_idx = pp.create_load(
+                    clean,
+                    bus=bus_map[row["bus"]],
+                    p_mw=float(row.get("p_mw", 0.0)),
+                    q_mvar=float(row.get("q_mvar", 0.0)),
+                    name=row.get("name", None),
+                    in_service=bool(row.get("in_service", True)),
+                    scaling=float(row.get("scaling", 1.0)),
+                    type=row.get("type", None),
+                )
+                for col in ("controllable", "const_z_percent", "const_i_percent", "sn_mva", "min_p_mw", "max_p_mw", "min_q_mvar", "max_q_mvar"):
+                    if col in src_net.load.columns and col in clean.load.columns:
+                        clean.load.at[load_idx, col] = row[col]
+
+        if len(getattr(src_net, "sgen", [])):
+            for _, row in src_net.sgen.iterrows():
+                sgen_idx = pp.create_sgen(
+                    clean,
+                    bus=bus_map[row["bus"]],
+                    p_mw=float(row.get("p_mw", 0.0)),
+                    q_mvar=float(row.get("q_mvar", 0.0)),
+                    sn_mva=float(row.get("sn_mva", 0.0)) if not pp.isna(row.get("sn_mva", None)) else None,
+                    name=row.get("name", None),
+                    controllable=bool(row.get("controllable", False)),
+                    type=row.get("type", None),
+                    in_service=bool(row.get("in_service", True)),
+                    scaling=float(row.get("scaling", 1.0)),
+                )
+                for col in ("min_p_mw", "max_p_mw", "min_q_mvar", "max_q_mvar"):
+                    if col in src_net.sgen.columns and col in clean.sgen.columns:
+                        clean.sgen.at[sgen_idx, col] = row[col]
+
+        if len(getattr(src_net, "storage", [])):
+            for _, row in src_net.storage.iterrows():
+                storage_idx = pp.create_storage(
+                    clean,
+                    bus=bus_map[row["bus"]],
+                    p_mw=float(row.get("p_mw", 0.0)),
+                    max_e_mwh=float(row.get("max_e_mwh", 0.0)),
+                    soc_percent=float(row.get("soc_percent", 0.0)),
+                    min_e_mwh=float(row.get("min_e_mwh", 0.0)),
+                    max_p_mw=float(row.get("max_p_mw", 0.0)),
+                    min_p_mw=float(row.get("min_p_mw", 0.0)),
+                    name=row.get("name", None),
+                    controllable=bool(row.get("controllable", False)),
+                    in_service=bool(row.get("in_service", True)),
+                )
+                for col in ("max_q_mvar", "min_q_mvar"):
+                    if col in src_net.storage.columns and col in clean.storage.columns:
+                        clean.storage.at[storage_idx, col] = row[col]
+
+        if len(getattr(src_net, "poly_cost", [])):
+            for _, row in src_net.poly_cost.iterrows():
+                element_type = row.get("et", row.get("element_type", None))
+                element = int(row.get("element", 0))
+                pp.create_poly_cost(
+                    clean,
+                    element=element,
+                    et=element_type,
+                    cp1_eur_per_mw=float(row.get("cp1_eur_per_mw", 0.0)),
+                    cp2_eur_per_mw2=float(row.get("cp2_eur_per_mw2", 0.0)),
+                    cq1_eur_per_mvar=float(row.get("cq1_eur_per_mvar", 0.0)) if "cq1_eur_per_mvar" in row else 0.0,
+                    cq2_eur_per_mvar2=float(row.get("cq2_eur_per_mvar2", 0.0)) if "cq2_eur_per_mvar2" in row else 0.0,
+                    standing_cost=float(row.get("standing_cost", 0.0)) if "standing_cost" in row else 0.0,
+                )
+
+        return cls._materialize_writable_net(clean)
+
+    @staticmethod
     def _build_ieee33_net():
         net = pp.create_empty_network(sn_mva=10.0)
         bus_indices = {}
@@ -228,11 +357,13 @@ class PPPowerGrid33:
     def from_client_name(cls, client_name: str, station_bus_map=None, compute_thevenin=True):
         from env.grid_variants import build_grid_variant
 
+        variant_net = build_grid_variant(client_name)
+        clean_net = cls._rebuild_clean_net_from_variant(variant_net)
         return cls(
             station_bus_map=station_bus_map,
             compute_thevenin=compute_thevenin,
             client_name=client_name,
-            net=build_grid_variant(client_name),
+            net=clean_net,
         )
 
     def _net_with_loads(self, loads):
