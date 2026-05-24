@@ -255,16 +255,18 @@ class PPPowerGrid33:
 
     def _runpp(self, net):
         t0 = time.perf_counter()
-        pp.runpp(net, algorithm="bfsw", calculate_voltage_angles=False)
+        safe_net = copy.deepcopy(net)
+        pp.runpp(safe_net, algorithm="bfsw", calculate_voltage_angles=False)
         elapsed = time.perf_counter() - t0
         self.runpp_call_count += 1
         self.runpp_total_time_s += elapsed
         self.last_runpp_time_s = elapsed
+        return safe_net
 
     def run_power_flow(self, loads):
         """Run pandapower AC load flow. Loads are kW keyed by Bus_N or station power node."""
         self.net = self._net_with_loads(loads)
-        self._runpp(self.net)
+        self.net = self._runpp(self.net)
 
         self.bus_voltages = {}
         self.voltage_violations = []
@@ -298,8 +300,7 @@ class PPPowerGrid33:
 
     def _compute_thevenin_resistances(self):
         result = {}
-        base_net = copy.deepcopy(self.base_net)
-        self._runpp(base_net)
+        base_net = self._runpp(copy.deepcopy(self.base_net))
         slack_v = self.v_nominal_kv * 1000.0
         perturb_mw = 1.0
 
@@ -315,7 +316,7 @@ class PPPowerGrid33:
                 q_mvar=0.0,
                 name=f"Thevenin_Test_{bus_num}",
             )
-            self._runpp(test_net)
+            test_net = self._runpp(test_net)
             dv_pu = (
                 float(base_net.res_bus.at[bus_idx, "vm_pu"])
                 - float(test_net.res_bus.at[bus_idx, "vm_pu"])
