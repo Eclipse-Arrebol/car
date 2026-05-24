@@ -48,7 +48,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Evaluate federated hindsight checkpoints")
     p.add_argument("--episodes", type=int, default=10)
     p.add_argument("--steps-per-episode", type=int, default=100)
-    p.add_argument("--num-evs", type=int, default=20)
+    p.add_argument("--num-evs", type=int, default=80)
     p.add_argument("--num-stations", type=int, default=4)
     p.add_argument("--num-chargers-per-station", type=int, default=8)
     p.add_argument("--graphml-file", type=str, default=DEFAULT_GRAPHML)
