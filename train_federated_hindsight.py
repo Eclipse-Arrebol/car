@@ -7,6 +7,7 @@ client-specific EMA/IEEE33 federated setup.
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import sys
 import time
@@ -28,6 +29,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 DEFAULT_GRAPHML = os.path.join("map_outputs", "ema", "ema.graphml")
 DEFAULT_CACHE_DIR = os.path.join("map_outputs", "ema_cache")
 DEFAULT_CLIENTS = ["old_city", "new_city", "suburb"]
+DEFAULT_REWARD_CSV = os.path.join("checkpoints_federated_hindsight", "training_rewards.csv")
 
 
 def parse_args():
@@ -51,6 +53,12 @@ def parse_args():
     )
     p.add_argument("--save-dir", type=str, default="checkpoints_federated_hindsight")
     p.add_argument("--save-every", type=int, default=1)
+    p.add_argument(
+        "--reward-log",
+        type=str,
+        default=DEFAULT_REWARD_CSV,
+        help="CSV path for per-round client rewards",
+    )
     p.add_argument("--network", type=str, default="station_only",
                    choices=["original", "lightweight", "station_only"])
     p.add_argument(
@@ -92,6 +100,9 @@ def main():
 
     trainer = FederatedHindsightTrainer(client_configs, parallel=not args.serial)
     os.makedirs(args.save_dir, exist_ok=True)
+    reward_log_dir = os.path.dirname(args.reward_log)
+    if reward_log_dir:
+        os.makedirs(reward_log_dir, exist_ok=True)
 
     print(
         f"[setup] rounds={args.rounds} clients={trainer.client_names()} "
@@ -101,19 +112,34 @@ def main():
     )
     print(f"[setup] graphml={args.graphml_file} cache_dir={args.cache_dir}")
 
-    t0 = time.time()
-    for round_idx in range(args.rounds):
-        metrics = trainer.train_round()
-        elapsed = time.time() - t0
-        print(f"[round {round_idx + 1}/{args.rounds}] elapsed={elapsed:.1f}s")
-        for client_name, stat in metrics.items():
-            print(
-                f"  - {client_name}: memory={stat['memory_size']:.0f} "
-                f"avg_trip={stat['avg_trip_h']:.4f}h avg_queue={stat['avg_queue_h']:.4f}h "
-                f"avg_fee={stat['avg_fee']:.4f} avg_reward={stat['avg_reward']:.4f}"
-            )
-        if (round_idx + 1) % args.save_every == 0:
-            trainer.save_global_models(args.save_dir, round_idx=round_idx + 1)
+    with open(args.reward_log, "w", newline="", encoding="utf-8") as reward_fp:
+        writer = csv.writer(reward_fp)
+        writer.writerow(["round", "client", "avg_reward", "avg_trip_h", "avg_queue_h", "avg_fee", "memory_size"])
+        reward_fp.flush()
+
+        t0 = time.time()
+        for round_idx in range(args.rounds):
+            metrics = trainer.train_round()
+            elapsed = time.time() - t0
+            print(f"[round {round_idx + 1}/{args.rounds}] elapsed={elapsed:.1f}s")
+            for client_name, stat in metrics.items():
+                print(
+                    f"  - {client_name}: memory={stat['memory_size']:.0f} "
+                    f"avg_trip={stat['avg_trip_h']:.4f}h avg_queue={stat['avg_queue_h']:.4f}h "
+                    f"avg_fee={stat['avg_fee']:.4f} avg_reward={stat['avg_reward']:.4f}"
+                )
+                writer.writerow([
+                    round_idx + 1,
+                    client_name,
+                    stat["avg_reward"],
+                    stat["avg_trip_h"],
+                    stat["avg_queue_h"],
+                    stat["avg_fee"],
+                    stat["memory_size"],
+                ])
+            reward_fp.flush()
+            if (round_idx + 1) % args.save_every == 0:
+                trainer.save_global_models(args.save_dir, round_idx=round_idx + 1)
 
     trainer.save_global_models(args.save_dir, round_idx=None)
     print(f"[done] total elapsed = {time.time() - t0:.1f}s")

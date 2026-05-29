@@ -348,8 +348,9 @@ class FederatedHindsightTrainer:
         return avg_state
 
     def _sync_global_weights_to_clients(self, global_state: Dict[str, torch.Tensor]) -> None:
+        global_state_cpu = _cpu_state_dict(global_state)
         for client in self.clients:
-            client.agent.policy_net.load_state_dict(global_state, strict=False)
+            client.agent.policy_net.load_state_dict(global_state_cpu, strict=False)
             client.agent.target_net.load_state_dict(client.agent.policy_net.state_dict())
 
     def _train_round_serial(self) -> Tuple[List[Dict[str, torch.Tensor]], Dict[str, Dict[str, float]]]:
@@ -372,7 +373,7 @@ class FederatedHindsightTrainer:
                 WorkerCommand(
                     kind="round",
                     payload={
-                        "global_state": client.agent.policy_net.state_dict(),
+                        "global_state": _cpu_state_dict(client.agent.policy_net.state_dict()),
                         "memory": self.client_memory_cache.get(client.config.client_name, []),
                         "batch_size": client.config.batch_size,
                         "steps_per_episode": client.config.steps_per_episode,
