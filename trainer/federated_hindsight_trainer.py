@@ -14,14 +14,14 @@ so CUDA can be initialized safely on Linux/Windows.
 """
 
 from collections import deque
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from io import BytesIO
+import multiprocessing as mp
 from multiprocessing import get_context
 from multiprocessing.connection import Connection
 from typing import Dict, List, Sequence, Tuple
 
 import os
-import queue
 import torch
 
 from agents.hindsight_dqn_agent import HindsightDQNAgent
@@ -65,9 +65,9 @@ class ClientRoundResult:
 @dataclass
 class WorkerResponse:
     client_name: str
-    state_dict: Dict[str, torch.Tensor]
+    state_bytes: bytes
     metrics: Dict[str, float]
-    memory: list
+    memory: list | None = None
 
 
 @dataclass
@@ -88,6 +88,23 @@ def _deserialize_memory(memory_list: list | None, maxlen: int) -> deque:
 
 def _cpu_state_dict(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     return {k: v.detach().cpu().clone() for k, v in state_dict.items()}
+
+
+def _pack_state_dict(state_dict: Dict[str, torch.Tensor]) -> bytes:
+    """Serialize tensors as plain bytes before crossing multiprocessing pipes.
+
+    Sending raw torch.Tensor objects through multiprocessing uses shared-memory
+    file descriptors. Repeating that every federated round can exhaust the
+    process fd limit on long runs.
+    """
+    buffer = BytesIO()
+    torch.save(_cpu_state_dict(state_dict), buffer)
+    return buffer.getvalue()
+
+
+def _unpack_state_dict(state_bytes: bytes) -> Dict[str, torch.Tensor]:
+    buffer = BytesIO(state_bytes)
+    return torch.load(buffer, map_location="cpu")
 
 
 def _build_runtime(cfg: FederatedClientConfig):
@@ -119,9 +136,12 @@ def _run_local_round(
     cfg: FederatedClientConfig,
     global_state: Dict[str, torch.Tensor] | None,
     prior_memory: list | None,
+    prior_epsilon: float | None = None,
 ) -> WorkerResponse:
     env, agent, trainer = _build_runtime(cfg)
     agent.memory = _deserialize_memory(prior_memory, agent.memory.maxlen)
+    if prior_epsilon is not None:
+        agent.epsilon = float(prior_epsilon)
 
     try:
         if global_state is not None:
@@ -156,9 +176,11 @@ def _run_local_round(
             if done:
                 break
 
+        agent.decay_epsilon()
         metrics = {
             "episodes": 1.0,
             "memory_size": float(len(agent.memory)),
+            "epsilon": float(agent.epsilon),
             "avg_trip_h": float(sum(ep_trip) / len(ep_trip)) if ep_trip else 0.0,
             "avg_queue_h": float(sum(ep_queue) / len(ep_queue)) if ep_queue else 0.0,
             "avg_fee": float(sum(ep_fee) / len(ep_fee)) if ep_fee else 0.0,
@@ -166,7 +188,7 @@ def _run_local_round(
         }
         return WorkerResponse(
             client_name=cfg.client_name,
-            state_dict=_cpu_state_dict(agent.policy_net.state_dict()),
+            state_bytes=_pack_state_dict(agent.policy_net.state_dict()),
             metrics=metrics,
             memory=_serialize_memory(agent.memory),
         )
@@ -195,9 +217,11 @@ class _PersistentClientWorker:
                 if cmd.kind == "round":
                     payload = cmd.payload or {}
                     if payload.get("global_state") is not None:
-                        agent.policy_net.load_state_dict(payload["global_state"], strict=False)
+                        global_state = _unpack_state_dict(payload["global_state"])
+                        agent.policy_net.load_state_dict(global_state, strict=False)
                         agent.target_net.load_state_dict(agent.policy_net.state_dict())
-                    agent.memory = _deserialize_memory(payload.get("memory"), agent.memory.maxlen)
+                    if "memory" in payload:
+                        agent.memory = _deserialize_memory(payload.get("memory"), agent.memory.maxlen)
                     env.reset()
                     trainer.pending.clear()
                     trainer._current_step = 0
@@ -226,9 +250,11 @@ class _PersistentClientWorker:
                         if done:
                             break
 
+                    agent.decay_epsilon()
                     metrics = {
                         "episodes": 1.0,
                         "memory_size": float(len(agent.memory)),
+                        "epsilon": float(agent.epsilon),
                         "avg_trip_h": float(sum(ep_trip) / len(ep_trip)) if ep_trip else 0.0,
                         "avg_queue_h": float(sum(ep_queue) / len(ep_queue)) if ep_queue else 0.0,
                         "avg_fee": float(sum(ep_fee) / len(ep_fee)) if ep_fee else 0.0,
@@ -237,14 +263,17 @@ class _PersistentClientWorker:
                     self.conn.send(
                         WorkerResponse(
                             client_name=self.cfg.client_name,
-                            state_dict=_cpu_state_dict(agent.policy_net.state_dict()),
+                            state_bytes=_pack_state_dict(agent.policy_net.state_dict()),
                             metrics=metrics,
-                            memory=_serialize_memory(agent.memory),
                         )
                     )
                     continue
                 raise ValueError(f"Unknown command kind: {cmd.kind!r}")
         finally:
+            try:
+                self.conn.close()
+            except Exception:
+                pass
             try:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -303,6 +332,7 @@ class FederatedHindsightTrainer:
             parent_conn, child_conn = ctx.Pipe()
             proc = ctx.Process(target=_persistent_worker_entry, args=(cfg, child_conn), daemon=True)
             proc.start()
+            child_conn.close()
             self._workers[cfg.client_name] = proc
             self._worker_conns[cfg.client_name] = parent_conn
 
@@ -357,11 +387,17 @@ class FederatedHindsightTrainer:
         client_states = []
         metrics: Dict[str, Dict[str, float]] = {}
         for client in self.clients:
-            result = _run_local_round(client.config, client.agent.policy_net.state_dict(), self.client_memory_cache.get(client.config.client_name))
-            client_states.append(result.state_dict)
+            result = _run_local_round(
+                client.config,
+                client.agent.policy_net.state_dict(),
+                self.client_memory_cache.get(client.config.client_name),
+                prior_epsilon=client.agent.epsilon,
+            )
+            client_states.append(_unpack_state_dict(result.state_bytes))
             metrics[result.client_name] = result.metrics
             self.client_memory_cache[result.client_name] = result.memory
             client.agent.memory = deque(result.memory, maxlen=client.agent.memory.maxlen)
+            client.agent.epsilon = result.metrics["epsilon"]
         return client_states, metrics
 
     def _train_round_parallel(self) -> Tuple[List[Dict[str, torch.Tensor]], Dict[str, Dict[str, float]]]:
@@ -373,8 +409,7 @@ class FederatedHindsightTrainer:
                 WorkerCommand(
                     kind="round",
                     payload={
-                        "global_state": _cpu_state_dict(client.agent.policy_net.state_dict()),
-                        "memory": self.client_memory_cache.get(client.config.client_name, []),
+                        "global_state": _pack_state_dict(client.agent.policy_net.state_dict()),
                         "batch_size": client.config.batch_size,
                         "steps_per_episode": client.config.steps_per_episode,
                     },
@@ -386,10 +421,9 @@ class FederatedHindsightTrainer:
                 result: WorkerResponse = conn.recv()
             except EOFError as exc:
                 raise RuntimeError(f"Worker for client {client.config.client_name} exited unexpectedly") from exc
-            client_states.append(result.state_dict)
+            client_states.append(_unpack_state_dict(result.state_bytes))
             metrics[result.client_name] = result.metrics
-            self.client_memory_cache[result.client_name] = result.memory
-            client.agent.memory = deque(result.memory, maxlen=client.agent.memory.maxlen)
+            client.agent.epsilon = result.metrics["epsilon"]
         return client_states, metrics
 
     def train_round(self) -> Dict[str, Dict[str, float]]:

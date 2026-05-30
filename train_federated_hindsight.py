@@ -114,7 +114,7 @@ def main():
 
     with open(args.reward_log, "w", newline="", encoding="utf-8") as reward_fp:
         writer = csv.writer(reward_fp)
-        writer.writerow(["round", "client", "avg_reward", "avg_trip_h", "avg_queue_h", "avg_fee", "memory_size"])
+        writer.writerow(["round", "client", "avg_reward", "avg_trip_h", "avg_queue_h", "avg_fee", "memory_size", "epsilon"])
         reward_fp.flush()
 
         t0 = time.time()
@@ -125,6 +125,7 @@ def main():
             for client_name, stat in metrics.items():
                 print(
                     f"  - {client_name}: memory={stat['memory_size']:.0f} "
+                    f"epsilon={stat['epsilon']:.3f} "
                     f"avg_trip={stat['avg_trip_h']:.4f}h avg_queue={stat['avg_queue_h']:.4f}h "
                     f"avg_fee={stat['avg_fee']:.4f} avg_reward={stat['avg_reward']:.4f}"
                 )
@@ -136,6 +137,7 @@ def main():
                     stat["avg_queue_h"],
                     stat["avg_fee"],
                     stat["memory_size"],
+                    stat["epsilon"],
                 ])
             reward_fp.flush()
             if (round_idx + 1) % args.save_every == 0:
