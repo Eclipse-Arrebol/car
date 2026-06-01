@@ -1,30 +1,27 @@
 """Evaluate federated hindsight checkpoints on the three client grids.
 
-This script is a lightweight companion to `train_federated_hindsight.py` and
-`tools/debug_station_bias.py`.
-
-What it does:
-- builds each client grid (`old_city`, `new_city`, `suburb`)
-- loads the matching checkpoint if it exists
-- compares three policies on each client:
-  - random
-  - shortest_path
-  - model_greedy
-- prints episode-level and aggregate metrics
-
-The script is intentionally verbose so it can double as a diagnostic tool
-for station bias / queue pressure / reward collapse.
+This script is a companion to ``train_federated_hindsight.py`` and is meant
+for paper-facing evaluation:
+- same episode seeds across policies for fair paired comparison
+- strict checkpoint loading by default
+- per-episode CSV, aggregate CSV, and JSON metadata outputs
+- station choice diagnostics for bias/queue-pressure checks
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
+import json
+import math
 import os
 import random
 import sys
 import time
 from collections import Counter, defaultdict
-from statistics import mean
+from datetime import datetime
+from pathlib import Path
+from statistics import mean, stdev
 
 import torch
 
@@ -44,6 +41,9 @@ from env.real_env import RealTrafficEnv
 from train_federated_hindsight import DEFAULT_CLIENTS, DEFAULT_CACHE_DIR, DEFAULT_GRAPHML
 
 
+POLICY_NAMES = ("random", "shortest_path", "model_greedy")
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Evaluate federated hindsight checkpoints")
     p.add_argument("--episodes", type=int, default=10)
@@ -55,6 +55,13 @@ def parse_args():
     p.add_argument("--cache-dir", type=str, default=DEFAULT_CACHE_DIR)
     p.add_argument("--clients", nargs="+", default=DEFAULT_CLIENTS, choices=DEFAULT_CLIENTS)
     p.add_argument(
+        "--policies",
+        nargs="+",
+        default=list(POLICY_NAMES),
+        choices=POLICY_NAMES,
+        help="Policies to evaluate.",
+    )
+    p.add_argument(
         "--checkpoint-dir",
         type=str,
         default="checkpoints_federated_hindsight",
@@ -65,6 +72,18 @@ def parse_args():
         type=str,
         default="final",
         help="Checkpoint suffix, e.g. final or round100.",
+    )
+    p.add_argument(
+        "--allow-missing-checkpoint",
+        action="store_true",
+        default=False,
+        help="Evaluate model_greedy with random initialized weights if a checkpoint is missing.",
+    )
+    p.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Directory for summary.csv, episodes.csv, and metadata.json.",
     )
     p.add_argument(
         "--network",
@@ -88,7 +107,14 @@ def parse_args():
     return p.parse_args()
 
 
-def _env_kwargs(args, client_name: str) -> dict:
+def _set_seed(seed: int) -> None:
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _env_kwargs(args, client_name: str, seed: int | None = None) -> dict:
     kw = dict(
         graphml_file=args.graphml_file,
         num_stations=args.num_stations,
@@ -96,7 +122,7 @@ def _env_kwargs(args, client_name: str) -> dict:
         num_chargers_per_station=args.num_chargers_per_station,
         max_nodes=1_000_000,
         cache_dir=args.cache_dir,
-        seed=args.seed,
+        seed=args.seed if seed is None else int(seed),
         respawn_after_full_charge=args.respawn,
         client_name=client_name,
     )
@@ -110,15 +136,49 @@ def _env_kwargs(args, client_name: str) -> dict:
             kw["background_ue_tol"] = float(args.ue_tol)
             kw["background_ue_scale"] = float(args.ue_scale)
             kw["background_ue_verbose"] = bool(args.ue_verbose)
+        else:
+            print(
+                f"[setup] warn: UE TNTP not found (net={os.path.isfile(net_p)}, "
+                f"trips={os.path.isfile(trip_p)}), using heuristic background_edge_base_flows"
+            )
     return kw
+
+
+def _make_env(args, client_name: str, seed: int | None = None) -> RealTrafficEnv:
+    _set_seed(args.seed if seed is None else int(seed))
+    return RealTrafficEnv(**_env_kwargs(args, client_name, seed=seed))
 
 
 def _avg(values):
     return mean(values) if values else 0.0
 
 
-def _make_env(args, client_name: str) -> RealTrafficEnv:
-    return RealTrafficEnv(**_env_kwargs(args, client_name))
+def _stats(values: list[float]) -> dict[str, float | int]:
+    n = len(values)
+    avg = mean(values) if values else 0.0
+    sd = stdev(values) if n > 1 else 0.0
+    sem = sd / math.sqrt(n) if n > 1 else 0.0
+    return {
+        "n": n,
+        "mean": avg,
+        "std": sd,
+        "sem": sem,
+        "ci95": 1.96 * sem,
+    }
+
+
+def _episode_seed(args, episode: int) -> int:
+    return int(args.seed) + episode
+
+
+def _resolve_output_dir(args) -> Path:
+    if args.output_dir:
+        out = Path(args.output_dir)
+    else:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out = Path(args.checkpoint_dir) / f"eval_{args.checkpoint_suffix}_{stamp}"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
 
 
 def _load_model(args, env: RealTrafficEnv, checkpoint_path: str):
@@ -133,15 +193,43 @@ def _load_model(args, env: RealTrafficEnv, checkpoint_path: str):
     )
     if os.path.isfile(checkpoint_path):
         model.load_model(checkpoint_path)
+    elif not args.allow_missing_checkpoint:
+        raise FileNotFoundError(
+            f"Checkpoint not found for model_greedy: {checkpoint_path}. "
+            "Pass --allow-missing-checkpoint only for debugging."
+        )
+    else:
+        print(f"[setup] checkpoint not found, using random init: {checkpoint_path}")
+    model.policy_net.eval()
+    model.target_net.eval()
     return model
 
 
-def _run_policy(args, env: RealTrafficEnv, policy_name: str, policy_fn):
+def _completed_station_id(env: RealTrafficEnv, entry: dict) -> int | None:
+    if "station_id" in entry:
+        return int(entry["station_id"])
+    ev_id = entry.get("ev_id")
+    for ev in env.evs:
+        if ev.id == ev_id:
+            station_id = getattr(ev, "charge_station_id", None)
+            return int(station_id) if station_id is not None else None
+    return None
+
+
+def _valid_actions(action_mask, num_stations: int) -> list[int]:
+    valid = action_mask.squeeze().nonzero(as_tuple=True)[0].tolist()
+    return [int(v) for v in valid] if valid else list(range(num_stations))
+
+
+def _run_policy(args, client_name: str, policy_name: str, policy_fn):
+    env = _make_env(args, client_name, seed=args.seed)
     choice_counter = Counter()
+    station_completed = Counter()
     station_trip = defaultdict(list)
     station_queue = defaultdict(list)
     station_fee = defaultdict(list)
     all_trip, all_queue, all_fee, all_reward = [], [], [], []
+    episode_rows: list[dict] = []
     t0 = time.time()
 
     print(
@@ -152,6 +240,8 @@ def _run_policy(args, env: RealTrafficEnv, policy_name: str, policy_fn):
     print(f"[client={env.power_grid.client_name}] station_nodes={[s.traffic_node_id for s in env.stations]}")
 
     for episode in range(args.episodes):
+        seed = _episode_seed(args, episode)
+        _set_seed(seed)
         env.reset()
         ep_trip, ep_queue, ep_fee, ep_reward = [], [], [], []
         steps_run = 0
@@ -163,19 +253,14 @@ def _run_policy(args, env: RealTrafficEnv, policy_name: str, policy_fn):
                 state = env.get_graph_state_for_ev(ev)
                 action_mask = env.get_action_mask(ev)
                 action = policy_fn(env, ev, state, action_mask)
-                actions[ev.id] = action
-                choice_counter[action] += 1
+                actions[ev.id] = int(action)
+                choice_counter[int(action)] += 1
 
             _obs, _reward, done, info = env.step(actions)
             steps_run += 1
 
             for entry in info.get("completed", []):
-                ev_id = entry.get("ev_id")
-                action = None
-                for ev in env.evs:
-                    if ev.id == ev_id:
-                        action = getattr(ev, "target_station_idx", None)
-                        break
+                station_id = _completed_station_id(env, entry)
                 trip = float(entry.get("actual_trip_time_h", 0.0))
                 queue = float(entry.get("actual_queue_time_h", 0.0))
                 fee = float(entry.get("charging_fee", 0.0))
@@ -184,10 +269,11 @@ def _run_policy(args, env: RealTrafficEnv, policy_name: str, policy_fn):
                 ep_queue.append(queue)
                 ep_fee.append(fee)
                 ep_reward.append(reward)
-                if action is not None:
-                    station_trip[action].append(trip)
-                    station_queue[action].append(queue)
-                    station_fee[action].append(fee)
+                if station_id is not None:
+                    station_completed[station_id] += 1
+                    station_trip[station_id].append(trip)
+                    station_queue[station_id].append(queue)
+                    station_fee[station_id].append(fee)
 
             if done:
                 break
@@ -196,70 +282,206 @@ def _run_policy(args, env: RealTrafficEnv, policy_name: str, policy_fn):
         all_queue.extend(ep_queue)
         all_fee.extend(ep_fee)
         all_reward.extend(ep_reward)
+        ep_row = {
+            "client": client_name,
+            "policy": policy_name,
+            "episode": episode + 1,
+            "seed": seed,
+            "steps": steps_run,
+            "completed": len(ep_trip),
+            "avg_trip_h": _avg(ep_trip),
+            "avg_queue_h": _avg(ep_queue),
+            "avg_fee": _avg(ep_fee),
+            "avg_reward": _avg(ep_reward),
+            "avg_weighted_cost": -_avg(ep_reward),
+        }
+        episode_rows.append(ep_row)
         print(
             f"[client={env.power_grid.client_name}] ep {episode + 1}/{args.episodes} "
-            f"steps={steps_run} completed={len(ep_trip)} avg_trip={_avg(ep_trip):.4f}h "
-            f"avg_queue={_avg(ep_queue):.4f}h avg_fee={_avg(ep_fee):.4f} "
-            f"avg_reward={_avg(ep_reward):.4f}"
+            f"seed={seed} steps={steps_run} completed={len(ep_trip)} "
+            f"avg_trip={ep_row['avg_trip_h']:.4f}h avg_queue={ep_row['avg_queue_h']:.4f}h "
+            f"avg_fee={ep_row['avg_fee']:.4f} avg_cost={ep_row['avg_weighted_cost']:.4f}"
         )
 
     elapsed = time.time() - t0
     print(f"\n[client={env.power_grid.client_name}] policy={policy_name} choice_count={dict(choice_counter)}")
-    for sid in sorted(set(choice_counter.keys()) | set(station_trip.keys()) | set(station_queue.keys()) | set(station_fee.keys())):
+    for sid in sorted(set(choice_counter.keys()) | set(station_completed.keys())):
         print(
             f"[client={env.power_grid.client_name}] station={sid} "
-            f"choices={choice_counter.get(sid, 0)} "
+            f"choices={choice_counter.get(sid, 0)} completed={station_completed.get(sid, 0)} "
             f"avg_trip={_avg(station_trip[sid]):.4f}h "
             f"avg_queue={_avg(station_queue[sid]):.4f}h "
             f"avg_fee={_avg(station_fee[sid]):.4f}"
         )
 
+    completed_per_episode = [int(row["completed"]) for row in episode_rows]
+    ep_trip_means = [float(row["avg_trip_h"]) for row in episode_rows if int(row["completed"]) > 0]
+    ep_queue_means = [float(row["avg_queue_h"]) for row in episode_rows if int(row["completed"]) > 0]
+    ep_fee_means = [float(row["avg_fee"]) for row in episode_rows if int(row["completed"]) > 0]
+    ep_cost_means = [float(row["avg_weighted_cost"]) for row in episode_rows if int(row["completed"]) > 0]
+
+    trip_stats = _stats(ep_trip_means)
+    queue_stats = _stats(ep_queue_means)
+    fee_stats = _stats(ep_fee_means)
+    cost_stats = _stats(ep_cost_means)
+    completed_stats = _stats([float(v) for v in completed_per_episode])
+
     summary = {
+        "client": client_name,
         "policy": policy_name,
         "episodes": args.episodes,
-        "elapsed": elapsed,
-        "completed": len(all_trip),
-        "avg_trip": _avg(all_trip),
-        "avg_queue": _avg(all_queue),
-        "avg_fee": _avg(all_fee),
-        "avg_reward": _avg(all_reward),
+        "steps_per_episode": args.steps_per_episode,
+        "elapsed_s": elapsed,
+        "completed_total": len(all_trip),
+        "completed_per_episode_mean": completed_stats["mean"],
+        "completed_per_episode_std": completed_stats["std"],
+        "session_avg_trip_h": _avg(all_trip),
+        "session_avg_queue_h": _avg(all_queue),
+        "session_avg_fee": _avg(all_fee),
+        "session_avg_reward": _avg(all_reward),
+        "session_avg_weighted_cost": -_avg(all_reward),
+        "episode_avg_trip_h_mean": trip_stats["mean"],
+        "episode_avg_trip_h_std": trip_stats["std"],
+        "episode_avg_trip_h_sem": trip_stats["sem"],
+        "episode_avg_trip_h_ci95": trip_stats["ci95"],
+        "episode_avg_queue_h_mean": queue_stats["mean"],
+        "episode_avg_queue_h_std": queue_stats["std"],
+        "episode_avg_queue_h_sem": queue_stats["sem"],
+        "episode_avg_queue_h_ci95": queue_stats["ci95"],
+        "episode_avg_fee_mean": fee_stats["mean"],
+        "episode_avg_fee_std": fee_stats["std"],
+        "episode_avg_fee_sem": fee_stats["sem"],
+        "episode_avg_fee_ci95": fee_stats["ci95"],
+        "episode_avg_weighted_cost_mean": cost_stats["mean"],
+        "episode_avg_weighted_cost_std": cost_stats["std"],
+        "episode_avg_weighted_cost_sem": cost_stats["sem"],
+        "episode_avg_weighted_cost_ci95": cost_stats["ci95"],
         "choice_count": dict(choice_counter),
+        "completed_by_station": dict(station_completed),
+        "station_metrics": {
+            str(sid): {
+                "choices": int(choice_counter.get(sid, 0)),
+                "completed": int(station_completed.get(sid, 0)),
+                "avg_trip_h": _avg(station_trip[sid]),
+                "avg_queue_h": _avg(station_queue[sid]),
+                "avg_fee": _avg(station_fee[sid]),
+            }
+            for sid in sorted(set(choice_counter.keys()) | set(station_completed.keys()))
+        },
     }
     print(
-        f"[client={env.power_grid.client_name}] policy={policy_name} summary completed={summary['completed']} "
-        f"avg_trip={summary['avg_trip']:.4f}h avg_queue={summary['avg_queue']:.4f}h "
-        f"avg_fee={summary['avg_fee']:.4f} avg_reward={summary['avg_reward']:.4f} "
-        f"elapsed={summary['elapsed']:.1f}s"
+        f"[client={env.power_grid.client_name}] policy={policy_name} summary "
+        f"completed={summary['completed_total']} "
+        f"trip={summary['episode_avg_trip_h_mean']:.4f}+/-{summary['episode_avg_trip_h_ci95']:.4f}h "
+        f"queue={summary['episode_avg_queue_h_mean']:.4f}+/-{summary['episode_avg_queue_h_ci95']:.4f}h "
+        f"fee={summary['episode_avg_fee_mean']:.4f}+/-{summary['episode_avg_fee_ci95']:.4f} "
+        f"cost={summary['episode_avg_weighted_cost_mean']:.4f}+/-{summary['episode_avg_weighted_cost_ci95']:.4f} "
+        f"elapsed={summary['elapsed_s']:.1f}s"
     )
-    return summary
+    return summary, episode_rows
+
+
+def _write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as fp:
+        writer = csv.DictWriter(fp, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def _write_outputs(args, out_dir: Path, summaries: list[dict], episode_rows: list[dict]) -> None:
+    summary_fields = [
+        "client",
+        "policy",
+        "episodes",
+        "steps_per_episode",
+        "elapsed_s",
+        "completed_total",
+        "completed_per_episode_mean",
+        "completed_per_episode_std",
+        "session_avg_trip_h",
+        "session_avg_queue_h",
+        "session_avg_fee",
+        "session_avg_weighted_cost",
+        "episode_avg_trip_h_mean",
+        "episode_avg_trip_h_std",
+        "episode_avg_trip_h_sem",
+        "episode_avg_trip_h_ci95",
+        "episode_avg_queue_h_mean",
+        "episode_avg_queue_h_std",
+        "episode_avg_queue_h_sem",
+        "episode_avg_queue_h_ci95",
+        "episode_avg_fee_mean",
+        "episode_avg_fee_std",
+        "episode_avg_fee_sem",
+        "episode_avg_fee_ci95",
+        "episode_avg_weighted_cost_mean",
+        "episode_avg_weighted_cost_std",
+        "episode_avg_weighted_cost_sem",
+        "episode_avg_weighted_cost_ci95",
+    ]
+    episode_fields = [
+        "client",
+        "policy",
+        "episode",
+        "seed",
+        "steps",
+        "completed",
+        "avg_trip_h",
+        "avg_queue_h",
+        "avg_fee",
+        "avg_reward",
+        "avg_weighted_cost",
+    ]
+    _write_csv(out_dir / "summary.csv", summaries, summary_fields)
+    _write_csv(out_dir / "episodes.csv", episode_rows, episode_fields)
+
+    metadata = {
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "args": vars(args),
+        "summaries": summaries,
+    }
+    with (out_dir / "metadata.json").open("w", encoding="utf-8") as fp:
+        json.dump(metadata, fp, ensure_ascii=False, indent=2)
 
 
 def main():
     args = parse_args()
+    out_dir = _resolve_output_dir(args)
+    _set_seed(args.seed)
     print(
         f"[setup] checkpoint_dir={args.checkpoint_dir} checkpoint_suffix={args.checkpoint_suffix} "
-        f"clients={args.clients} network={args.network} use_action_mask={args.use_action_mask}"
+        f"clients={args.clients} policies={args.policies} network={args.network} "
+        f"use_action_mask={args.use_action_mask} output_dir={out_dir}"
     )
+    if not args.no_ue_background:
+        print(
+            f"[setup] UE background requested: net={args.ue_net_tntp} trips={args.ue_trips_tntp} "
+            f"max_iter={args.ue_max_iter} tol={args.ue_tol} scale={args.ue_scale}"
+        )
+    else:
+        print("[setup] heuristic background (--no-ue-background)")
 
-    summaries = []
+    summaries: list[dict] = []
+    episode_rows: list[dict] = []
+
     for client_name in args.clients:
-        env = _make_env(args, client_name)
+        probe_env = _make_env(args, client_name, seed=args.seed)
         checkpoint = os.path.join(args.checkpoint_dir, f"{client_name}_{args.checkpoint_suffix}.pth")
-        model = _load_model(args, env, checkpoint)
-        if os.path.isfile(checkpoint):
-            print(f"[setup] loaded checkpoint for {client_name}: {checkpoint}")
-        else:
-            print(f"[setup] checkpoint not found for {client_name}, using random init: {checkpoint}")
+        model = None
+        if "model_greedy" in args.policies:
+            model = _load_model(args, probe_env, checkpoint)
+            if os.path.isfile(checkpoint):
+                print(f"[setup] loaded checkpoint for {client_name}: {checkpoint}")
 
-        def random_policy(_env, _ev, _state, action_mask):
-            valid = action_mask.squeeze().nonzero(as_tuple=True)[0].tolist()
-            return int(random.choice(valid))
+        def random_policy(env, _ev, _state, action_mask):
+            return int(random.choice(_valid_actions(action_mask, len(env.stations))))
 
         def shortest_path_policy(env_, ev, _state, action_mask):
             best_action = None
             best_time = None
             for station in env_.stations:
-                if not action_mask[0, station.id].item():
+                if station.id not in _valid_actions(action_mask, len(env_.stations)):
                     continue
                 metrics = env_.estimate_action_metrics(ev, station.id)
                 trip_time = metrics.get("trip_time_h", float("inf"))
@@ -269,6 +491,7 @@ def main():
             return int(best_action if best_action is not None else 0)
 
         def model_greedy_policy(_env, _ev, state, action_mask):
+            assert model is not None
             with torch.no_grad():
                 q_values = model.policy_net(
                     state.to(model.device),
@@ -277,20 +500,30 @@ def main():
                 )
                 return int(q_values.argmax().item())
 
-        summaries.append((client_name, _run_policy(args, env, "random", random_policy)))
-        summaries.append((client_name, _run_policy(args, env, "shortest_path", shortest_path_policy)))
-        summaries.append((client_name, _run_policy(args, env, "model_greedy", model_greedy_policy)))
+        policy_map = {
+            "random": random_policy,
+            "shortest_path": shortest_path_policy,
+            "model_greedy": model_greedy_policy,
+        }
+        for policy_name in args.policies:
+            summary, rows = _run_policy(args, client_name, policy_name, policy_map[policy_name])
+            summaries.append(summary)
+            episode_rows.extend(rows)
+            _write_outputs(args, out_dir, summaries, episode_rows)
 
     print("\n" + "=" * 80)
     print("Evaluation comparison")
     print("=" * 80)
-    for client_name, s in summaries:
+    for s in summaries:
         print(
-            f"[{client_name} / {s['policy']}] avg_trip={s['avg_trip']:.4f}h "
-            f"avg_queue={s['avg_queue']:.4f}h avg_fee={s['avg_fee']:.4f} "
-            f"avg_reward={s['avg_reward']:.4f} completed={s['completed']} "
-            f"elapsed={s['elapsed']:.1f}s choice_count={s['choice_count']}"
+            f"[{s['client']} / {s['policy']}] "
+            f"trip={s['episode_avg_trip_h_mean']:.4f}+/-{s['episode_avg_trip_h_ci95']:.4f}h "
+            f"queue={s['episode_avg_queue_h_mean']:.4f}+/-{s['episode_avg_queue_h_ci95']:.4f}h "
+            f"fee={s['episode_avg_fee_mean']:.4f}+/-{s['episode_avg_fee_ci95']:.4f} "
+            f"cost={s['episode_avg_weighted_cost_mean']:.4f}+/-{s['episode_avg_weighted_cost_ci95']:.4f} "
+            f"completed={s['completed_total']} elapsed={s['elapsed_s']:.1f}s"
         )
+    print(f"[done] wrote results to {out_dir}")
 
 
 if __name__ == "__main__":
