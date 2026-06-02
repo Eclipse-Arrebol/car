@@ -99,9 +99,57 @@ def parse_args():
     p.add_argument("--save-every", type=int, default=50,
                    help="Save a snapshot every N episodes")
 
+    # Constrained RL: user objective + grid constraints via Lagrangian multipliers
+    p.add_argument(
+        "--constraint-mode",
+        type=str,
+        default="off",
+        choices=["off", "lagrangian"],
+        help="Enable grid-constrained hindsight reward with adaptive Lagrangian penalties.",
+    )
+    p.add_argument("--lambda-lf-init", type=float, default=0.0,
+                   help="Initial multiplier for load fluctuation constraint.")
+    p.add_argument("--lambda-v-init", type=float, default=0.0,
+                   help="Initial multiplier for voltage-risk constraint.")
+    p.add_argument("--lambda-lf-lr", type=float, default=0.05,
+                   help="Learning rate for load fluctuation multiplier.")
+    p.add_argument("--lambda-v-lr", type=float, default=0.05,
+                   help="Learning rate for voltage-risk multiplier.")
+    p.add_argument("--lf-scale", type=float, default=1_000_000.0,
+                   help="Normalization scale for (P_t - P_{t-1})^2 in kW^2.")
+    p.add_argument("--lf-limit", type=float, default=0.05,
+                   help="Average normalized load fluctuation constraint threshold.")
+    p.add_argument("--voltage-min-pu", type=float, default=0.95,
+                   help="Minimum acceptable bus voltage in pu.")
+    p.add_argument("--voltage-scale", type=float, default=0.01,
+                   help="Normalization scale for voltage risk max(0, voltage_min - Vmin).")
+    p.add_argument("--voltage-risk-limit", type=float, default=0.0,
+                   help="Average normalized voltage risk constraint threshold.")
+    p.add_argument("--trip-weight", type=float, default=0.3)
+    p.add_argument("--queue-weight", type=float, default=0.5)
+    p.add_argument("--fee-weight", type=float, default=0.03)
+
     # Logging
     p.add_argument("--log-every", type=int, default=1)
     return p.parse_args()
+
+
+def _constraint_config_from_args(args) -> dict:
+    return {
+        "mode": args.constraint_mode,
+        "lambda_lf": args.lambda_lf_init,
+        "lambda_v": args.lambda_v_init,
+        "lambda_lf_lr": args.lambda_lf_lr,
+        "lambda_v_lr": args.lambda_v_lr,
+        "lf_scale": args.lf_scale,
+        "lf_limit": args.lf_limit,
+        "voltage_min_pu": args.voltage_min_pu,
+        "voltage_scale": args.voltage_scale,
+        "voltage_risk_limit": args.voltage_risk_limit,
+        "trip_weight": args.trip_weight,
+        "queue_weight": args.queue_weight,
+        "fee_weight": args.fee_weight,
+    }
 
 
 def main():
@@ -150,7 +198,7 @@ def main():
         network_variant=args.network,
         use_action_mask=args.use_action_mask,
     )
-    trainer = HindsightTrainer(env, agent)
+    trainer = HindsightTrainer(env, agent, constraint_config=_constraint_config_from_args(args))
 
     os.makedirs(args.save_dir, exist_ok=True)
     print(f"[setup] episodes={args.episodes} steps={args.steps_per_episode} "
@@ -158,7 +206,15 @@ def main():
           f"chargers_per_station={args.num_chargers_per_station} respawn={args.respawn} "
           f"ue_background={not args.no_ue_background} "
           f"network={args.network} use_action_mask={args.use_action_mask} "
-          f"full_no_mask_experiment={not args.use_action_mask}")
+          f"full_no_mask_experiment={not args.use_action_mask} "
+          f"constraint_mode={args.constraint_mode}")
+    if args.constraint_mode != "off":
+        print(
+            f"[setup] constraints: lf_limit={args.lf_limit} lf_scale={args.lf_scale} "
+            f"voltage_min={args.voltage_min_pu} voltage_risk_limit={args.voltage_risk_limit} "
+            f"lambda_lf_init={args.lambda_lf_init} lambda_v_init={args.lambda_v_init} "
+            f"lambda_lr=({args.lambda_lf_lr},{args.lambda_v_lr})"
+        )
     print(f"[setup] save_dir={args.save_dir} save_every={args.save_every}")
 
     t0 = time.time()
@@ -166,6 +222,7 @@ def main():
         env.reset()
         trainer.pending.clear()
         trainer._current_step = 0
+        trainer.reset_episode_constraints()
 
         steps_run = 0
         ep_trip, ep_queue, ep_fee, ep_reward = [], [], [], []
@@ -177,17 +234,18 @@ def main():
                 trip = float(entry.get("actual_trip_time_h", 0.0))
                 queue = float(entry.get("actual_queue_time_h", 0.0))
                 fee = float(entry.get("charging_fee", 0.0))
-                reward = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
                 ep_trip.append(trip)
                 ep_queue.append(queue)
                 ep_fee.append(fee)
-                ep_reward.append(reward)
+            ep_reward.extend(trainer.completed_rewards_this_step)
 
             if len(agent.memory) >= args.batch_size:
                 agent.replay(args.batch_size)
 
             if done:
                 break
+
+        constraint_stats = trainer.update_lagrange_multipliers()
 
         if episode % args.log_every == 0:
             epsilon = getattr(agent, "epsilon", None)
@@ -209,6 +267,19 @@ def main():
                 f"avg_fee={_avg(ep_fee):.4f} "
                 f"avg_reward={_avg(ep_reward):.4f}"
             )
+            if args.constraint_mode != "off":
+                print(
+                    f"[ep {episode+1}/{args.episodes}] "
+                    f"lambda_lf={constraint_stats['lambda_lf']:.4f} "
+                    f"lambda_v={constraint_stats['lambda_v']:.4f} "
+                    f"avg_lf={constraint_stats['avg_lf_norm']:.5f}/"
+                    f"{constraint_stats['lf_limit']:.5f} "
+                    f"avg_vrisk={constraint_stats['avg_voltage_risk_norm']:.5f}/"
+                    f"{constraint_stats['voltage_risk_limit']:.5f} "
+                    f"peak_load={constraint_stats['peak_power_kw']:.2f}kW "
+                    f"loss={constraint_stats['network_loss_kwh']:.4f}kWh "
+                    f"vmin={constraint_stats['min_voltage_pu']:.4f}pu"
+                )
 
         agent.decay_epsilon()
 

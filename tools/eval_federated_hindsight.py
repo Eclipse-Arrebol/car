@@ -229,6 +229,7 @@ def _run_policy(args, client_name: str, policy_name: str, policy_fn):
     station_queue = defaultdict(list)
     station_fee = defaultdict(list)
     all_trip, all_queue, all_fee, all_reward = [], [], [], []
+    all_step_power, all_step_loss, all_step_min_voltage = [], [], []
     episode_rows: list[dict] = []
     t0 = time.time()
 
@@ -244,7 +245,10 @@ def _run_policy(args, client_name: str, policy_name: str, policy_fn):
         _set_seed(seed)
         env.reset()
         ep_trip, ep_queue, ep_fee, ep_reward = [], [], [], []
+        ep_power, ep_loss, ep_min_voltage = [], [], []
         steps_run = 0
+        prev_power = 0.0
+        load_fluctuation = 0.0
 
         for _ in range(args.steps_per_episode):
             urgent_evs = env.get_pending_decision_evs()
@@ -258,6 +262,14 @@ def _run_policy(args, client_name: str, policy_name: str, policy_fn):
 
             _obs, _reward, done, info = env.step(actions)
             steps_run += 1
+            power_kw = float(info.get("realized_power", 0.0))
+            loss_kw = float(info.get("line_losses", 0.0))
+            min_voltage_pu = float(info.get("min_voltage_pu", 1.0))
+            load_fluctuation += (power_kw - prev_power) ** 2
+            prev_power = power_kw
+            ep_power.append(power_kw)
+            ep_loss.append(loss_kw)
+            ep_min_voltage.append(min_voltage_pu)
 
             for entry in info.get("completed", []):
                 station_id = _completed_station_id(env, entry)
@@ -282,6 +294,10 @@ def _run_policy(args, client_name: str, policy_name: str, policy_fn):
         all_queue.extend(ep_queue)
         all_fee.extend(ep_fee)
         all_reward.extend(ep_reward)
+        all_step_power.extend(ep_power)
+        all_step_loss.extend(ep_loss)
+        all_step_min_voltage.extend(ep_min_voltage)
+        step_duration_h = float(getattr(env, "step_duration_h", 1.0 / 6.0))
         ep_row = {
             "client": client_name,
             "policy": policy_name,
@@ -294,13 +310,21 @@ def _run_policy(args, client_name: str, policy_name: str, policy_fn):
             "avg_fee": _avg(ep_fee),
             "avg_reward": _avg(ep_reward),
             "avg_weighted_cost": -_avg(ep_reward),
+            "peak_load_kw": max(ep_power) if ep_power else 0.0,
+            "load_fluctuation_kw2": load_fluctuation,
+            "avg_line_loss_kw": _avg(ep_loss),
+            "network_loss_kwh": sum(ep_loss) * step_duration_h,
+            "min_voltage_pu": min(ep_min_voltage) if ep_min_voltage else 1.0,
         }
         episode_rows.append(ep_row)
         print(
             f"[client={env.power_grid.client_name}] ep {episode + 1}/{args.episodes} "
             f"seed={seed} steps={steps_run} completed={len(ep_trip)} "
             f"avg_trip={ep_row['avg_trip_h']:.4f}h avg_queue={ep_row['avg_queue_h']:.4f}h "
-            f"avg_fee={ep_row['avg_fee']:.4f} avg_cost={ep_row['avg_weighted_cost']:.4f}"
+            f"avg_fee={ep_row['avg_fee']:.4f} avg_cost={ep_row['avg_weighted_cost']:.4f} "
+            f"peak_load={ep_row['peak_load_kw']:.2f}kW "
+            f"loss={ep_row['network_loss_kwh']:.4f}kWh "
+            f"vmin={ep_row['min_voltage_pu']:.4f}pu"
         )
 
     elapsed = time.time() - t0
@@ -319,12 +343,20 @@ def _run_policy(args, client_name: str, policy_name: str, policy_fn):
     ep_queue_means = [float(row["avg_queue_h"]) for row in episode_rows if int(row["completed"]) > 0]
     ep_fee_means = [float(row["avg_fee"]) for row in episode_rows if int(row["completed"]) > 0]
     ep_cost_means = [float(row["avg_weighted_cost"]) for row in episode_rows if int(row["completed"]) > 0]
+    ep_peak_loads = [float(row["peak_load_kw"]) for row in episode_rows]
+    ep_load_fluctuations = [float(row["load_fluctuation_kw2"]) for row in episode_rows]
+    ep_network_losses = [float(row["network_loss_kwh"]) for row in episode_rows]
+    ep_min_voltages = [float(row["min_voltage_pu"]) for row in episode_rows]
 
     trip_stats = _stats(ep_trip_means)
     queue_stats = _stats(ep_queue_means)
     fee_stats = _stats(ep_fee_means)
     cost_stats = _stats(ep_cost_means)
     completed_stats = _stats([float(v) for v in completed_per_episode])
+    peak_load_stats = _stats(ep_peak_loads)
+    load_fluctuation_stats = _stats(ep_load_fluctuations)
+    network_loss_stats = _stats(ep_network_losses)
+    min_voltage_stats = _stats(ep_min_voltages)
 
     summary = {
         "client": client_name,
@@ -340,6 +372,9 @@ def _run_policy(args, client_name: str, policy_name: str, policy_fn):
         "session_avg_fee": _avg(all_fee),
         "session_avg_reward": _avg(all_reward),
         "session_avg_weighted_cost": -_avg(all_reward),
+        "session_peak_load_kw": max(all_step_power) if all_step_power else 0.0,
+        "session_avg_line_loss_kw": _avg(all_step_loss),
+        "session_min_voltage_pu": min(all_step_min_voltage) if all_step_min_voltage else 1.0,
         "episode_avg_trip_h_mean": trip_stats["mean"],
         "episode_avg_trip_h_std": trip_stats["std"],
         "episode_avg_trip_h_sem": trip_stats["sem"],
@@ -356,6 +391,22 @@ def _run_policy(args, client_name: str, policy_name: str, policy_fn):
         "episode_avg_weighted_cost_std": cost_stats["std"],
         "episode_avg_weighted_cost_sem": cost_stats["sem"],
         "episode_avg_weighted_cost_ci95": cost_stats["ci95"],
+        "episode_peak_load_kw_mean": peak_load_stats["mean"],
+        "episode_peak_load_kw_std": peak_load_stats["std"],
+        "episode_peak_load_kw_sem": peak_load_stats["sem"],
+        "episode_peak_load_kw_ci95": peak_load_stats["ci95"],
+        "episode_load_fluctuation_kw2_mean": load_fluctuation_stats["mean"],
+        "episode_load_fluctuation_kw2_std": load_fluctuation_stats["std"],
+        "episode_load_fluctuation_kw2_sem": load_fluctuation_stats["sem"],
+        "episode_load_fluctuation_kw2_ci95": load_fluctuation_stats["ci95"],
+        "episode_network_loss_kwh_mean": network_loss_stats["mean"],
+        "episode_network_loss_kwh_std": network_loss_stats["std"],
+        "episode_network_loss_kwh_sem": network_loss_stats["sem"],
+        "episode_network_loss_kwh_ci95": network_loss_stats["ci95"],
+        "episode_min_voltage_pu_mean": min_voltage_stats["mean"],
+        "episode_min_voltage_pu_std": min_voltage_stats["std"],
+        "episode_min_voltage_pu_sem": min_voltage_stats["sem"],
+        "episode_min_voltage_pu_ci95": min_voltage_stats["ci95"],
         "choice_count": dict(choice_counter),
         "completed_by_station": dict(station_completed),
         "station_metrics": {
@@ -376,6 +427,9 @@ def _run_policy(args, client_name: str, policy_name: str, policy_fn):
         f"queue={summary['episode_avg_queue_h_mean']:.4f}+/-{summary['episode_avg_queue_h_ci95']:.4f}h "
         f"fee={summary['episode_avg_fee_mean']:.4f}+/-{summary['episode_avg_fee_ci95']:.4f} "
         f"cost={summary['episode_avg_weighted_cost_mean']:.4f}+/-{summary['episode_avg_weighted_cost_ci95']:.4f} "
+        f"peak_load={summary['episode_peak_load_kw_mean']:.2f}+/-{summary['episode_peak_load_kw_ci95']:.2f}kW "
+        f"loss={summary['episode_network_loss_kwh_mean']:.4f}+/-{summary['episode_network_loss_kwh_ci95']:.4f}kWh "
+        f"vmin={summary['episode_min_voltage_pu_mean']:.4f}+/-{summary['episode_min_voltage_pu_ci95']:.4f}pu "
         f"elapsed={summary['elapsed_s']:.1f}s"
     )
     return summary, episode_rows
@@ -403,6 +457,9 @@ def _write_outputs(args, out_dir: Path, summaries: list[dict], episode_rows: lis
         "session_avg_queue_h",
         "session_avg_fee",
         "session_avg_weighted_cost",
+        "session_peak_load_kw",
+        "session_avg_line_loss_kw",
+        "session_min_voltage_pu",
         "episode_avg_trip_h_mean",
         "episode_avg_trip_h_std",
         "episode_avg_trip_h_sem",
@@ -419,6 +476,22 @@ def _write_outputs(args, out_dir: Path, summaries: list[dict], episode_rows: lis
         "episode_avg_weighted_cost_std",
         "episode_avg_weighted_cost_sem",
         "episode_avg_weighted_cost_ci95",
+        "episode_peak_load_kw_mean",
+        "episode_peak_load_kw_std",
+        "episode_peak_load_kw_sem",
+        "episode_peak_load_kw_ci95",
+        "episode_load_fluctuation_kw2_mean",
+        "episode_load_fluctuation_kw2_std",
+        "episode_load_fluctuation_kw2_sem",
+        "episode_load_fluctuation_kw2_ci95",
+        "episode_network_loss_kwh_mean",
+        "episode_network_loss_kwh_std",
+        "episode_network_loss_kwh_sem",
+        "episode_network_loss_kwh_ci95",
+        "episode_min_voltage_pu_mean",
+        "episode_min_voltage_pu_std",
+        "episode_min_voltage_pu_sem",
+        "episode_min_voltage_pu_ci95",
     ]
     episode_fields = [
         "client",
@@ -432,6 +505,11 @@ def _write_outputs(args, out_dir: Path, summaries: list[dict], episode_rows: lis
         "avg_fee",
         "avg_reward",
         "avg_weighted_cost",
+        "peak_load_kw",
+        "load_fluctuation_kw2",
+        "avg_line_loss_kw",
+        "network_loss_kwh",
+        "min_voltage_pu",
     ]
     _write_csv(out_dir / "summary.csv", summaries, summary_fields)
     _write_csv(out_dir / "episodes.csv", episode_rows, episode_fields)
@@ -521,6 +599,10 @@ def main():
             f"queue={s['episode_avg_queue_h_mean']:.4f}+/-{s['episode_avg_queue_h_ci95']:.4f}h "
             f"fee={s['episode_avg_fee_mean']:.4f}+/-{s['episode_avg_fee_ci95']:.4f} "
             f"cost={s['episode_avg_weighted_cost_mean']:.4f}+/-{s['episode_avg_weighted_cost_ci95']:.4f} "
+            f"peak_load={s['episode_peak_load_kw_mean']:.2f}+/-{s['episode_peak_load_kw_ci95']:.2f}kW "
+            f"LF={s['episode_load_fluctuation_kw2_mean']:.2f}+/-{s['episode_load_fluctuation_kw2_ci95']:.2f} "
+            f"NL={s['episode_network_loss_kwh_mean']:.4f}+/-{s['episode_network_loss_kwh_ci95']:.4f}kWh "
+            f"Vmin={s['episode_min_voltage_pu_mean']:.4f}+/-{s['episode_min_voltage_pu_ci95']:.4f}pu "
             f"completed={s['completed_total']} elapsed={s['elapsed_s']:.1f}s"
         )
     print(f"[done] wrote results to {out_dir}")
