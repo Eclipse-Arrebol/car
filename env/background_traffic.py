@@ -22,22 +22,34 @@ Edge = Tuple[int, int]
 BACKGROUND_EDGE_BASE_SCALE = 4.0
 
 
-def build_daily_profile(steps_per_day: int = 144) -> list[float]:
+def build_daily_profile(steps_per_day: int = 144, profile_name: str = "base") -> list[float]:
     """生成 144-step 日周期系数：早晚高峰用高斯峰叠加。"""
     if steps_per_day <= 0:
         raise ValueError("steps_per_day must be positive")
 
+    profile_name = (profile_name or "base").strip().lower()
+    params_by_profile = {
+        "base": (0.35, 0.85, 0.95, 0.08, 0.09, 0.28, 0.72),
+        "old_city": (0.45, 1.05, 1.10, 0.055, 0.065, 0.27, 0.71),
+        "new_city": (0.32, 0.65, 1.20, 0.08, 0.075, 0.30, 0.75),
+        "suburb": (0.25, 0.65, 0.70, 0.12, 0.13, 0.31, 0.70),
+    }
+    if profile_name not in params_by_profile:
+        raise ValueError(f"Unknown daily traffic profile: {profile_name!r}")
+
+    base, morning_amp, evening_amp, morning_sigma, evening_sigma, morning_at, evening_at = (
+        params_by_profile[profile_name]
+    )
     profile: list[float] = []
-    sigma_morning = steps_per_day * 0.08
-    sigma_evening = steps_per_day * 0.09
-    morning_peak = steps_per_day * 0.28
-    evening_peak = steps_per_day * 0.72
+    sigma_morning = steps_per_day * morning_sigma
+    sigma_evening = steps_per_day * evening_sigma
+    morning_peak = steps_per_day * morning_at
+    evening_peak = steps_per_day * evening_at
 
     for t in range(steps_per_day):
         morning = math.exp(-0.5 * ((t - morning_peak) / sigma_morning) ** 2)
         evening = math.exp(-0.5 * ((t - evening_peak) / sigma_evening) ** 2)
-        base = 0.35
-        profile.append(base + 0.85 * morning + 0.95 * evening)
+        profile.append(base + morning_amp * morning + evening_amp * evening)
 
     peak = max(profile)
     if peak <= 0:
@@ -99,8 +111,10 @@ def build_base_background_flows(
                 val = ue.get((v, u), 0.0)
             out[(u, v)] = float(val)
         return out
+    sc = float(ue_scale)
     return {
-        (u, v): edge_base_background_flow(u, v, graph_nodes) for u, v in edges_list
+        (u, v): edge_base_background_flow(u, v, graph_nodes) * sc
+        for u, v in edges_list
     }
 
 

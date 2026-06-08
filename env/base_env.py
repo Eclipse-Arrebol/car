@@ -21,7 +21,10 @@ def setup_background_traffic_and_respawn_nodes(env) -> None:
     env.legal_respawn_nodes = list(env.traffic_graph.nodes())
     for station in env.stations:
         station.legal_respawn_nodes = list(env.traffic_graph.nodes())
-    env.background_daily_profile = build_daily_profile(env.steps_per_day)
+    env.background_daily_profile = build_daily_profile(
+        env.steps_per_day,
+        profile_name=getattr(env, "background_daily_profile_name", "base"),
+    )
     env.background_edge_base_flows = build_base_background_flows(
         env.traffic_graph.edges(),
         env.traffic_graph.nodes(),
@@ -33,6 +36,10 @@ def setup_background_traffic_and_respawn_nodes(env) -> None:
         ue_verbose=bool(getattr(env, "background_ue_verbose", False)),
     )
     env.background_edge_flows = {}
+    apply_respawn_profile = getattr(env, "_apply_respawn_profile", None)
+    if callable(apply_respawn_profile):
+        for station in env.stations:
+            apply_respawn_profile(station)
 
 
 class TrafficPowerEnv:

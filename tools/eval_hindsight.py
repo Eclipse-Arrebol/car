@@ -42,6 +42,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 
 from agents.hindsight_dqn_agent import HindsightDQNAgent
 from env.real_env import RealTrafficEnv
+from env.traffic_profiles import TRAFFIC_PROFILE_CHOICES
 
 
 POLICY_NAMES = ("random", "shortest_path", "model_greedy")
@@ -57,6 +58,13 @@ def parse_args():
     p.add_argument("--graphml-file", type=str, default=os.path.join("map_outputs", "ema", "ema.graphml"))
     p.add_argument("--cache-dir", type=str, default=os.path.join("map_outputs", "ema_cache"))
     p.add_argument("--client-name", type=str, default="base")
+    p.add_argument(
+        "--traffic-profile",
+        type=str,
+        default="base",
+        choices=TRAFFIC_PROFILE_CHOICES,
+        help="Regional traffic style: base, old_city, new_city, or suburb.",
+    )
     p.add_argument(
         "--policies",
         nargs="+",
@@ -140,6 +148,7 @@ def _env_kwargs(args, seed: int | None = None) -> dict:
         seed=args.seed if seed is None else int(seed),
         respawn_after_full_charge=args.respawn,
         client_name=args.client_name,
+        traffic_profile=args.traffic_profile,
     )
     if not args.no_ue_background:
         net_p = args.ue_net_tntp
@@ -617,7 +626,7 @@ def main():
     print(
         f"[setup] scale: num_evs={args.num_evs} num_stations={args.num_stations} "
         f"chargers_per_station={args.num_chargers_per_station} respawn={args.respawn} "
-        f"client_name={args.client_name}"
+        f"client_name={args.client_name} traffic_profile={args.traffic_profile}"
     )
     if not args.no_ue_background:
         print(

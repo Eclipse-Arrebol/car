@@ -28,6 +28,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
         pass  # Python < 3.7 或非 TTY 环境,降级跳过
 
 from env.real_env import RealTrafficEnv
+from env.traffic_profiles import TRAFFIC_PROFILE_CHOICES
 from agents.hindsight_dqn_agent import HindsightDQNAgent
 from trainer.trainer import HindsightTrainer
 
@@ -56,6 +57,13 @@ def parse_args():
     p.add_argument("--respawn", action="store_true", default=True,
                    help="Respawn EV after full charge (default True)")
     p.add_argument("--no-respawn", dest="respawn", action="store_false")
+    p.add_argument(
+        "--traffic-profile",
+        type=str,
+        default="base",
+        choices=TRAFFIC_PROFILE_CHOICES,
+        help="Regional traffic style: base, old_city, new_city, or suburb.",
+    )
 
     # UE background (TNTP Frank–Wolfe); default on when both files exist
     p.add_argument(
@@ -164,6 +172,7 @@ def main():
         cache_dir=os.path.join("map_outputs", "ema_cache"),
         seed=42,
         respawn_after_full_charge=args.respawn,
+        traffic_profile=args.traffic_profile,
     )
     if not args.no_ue_background:
         net_p = args.ue_net_tntp
@@ -177,7 +186,8 @@ def main():
             env_kw["background_ue_verbose"] = bool(args.ue_verbose)
             print(
                 f"[setup] UE background baseline: net={net_p} trips={trip_p} "
-                f"max_iter={args.ue_max_iter} tol={args.ue_tol} scale={args.ue_scale}"
+                f"max_iter={args.ue_max_iter} tol={args.ue_tol} "
+                f"base_scale={args.ue_scale} traffic_profile={args.traffic_profile}"
             )
         else:
             print(
@@ -204,6 +214,7 @@ def main():
     print(f"[setup] episodes={args.episodes} steps={args.steps_per_episode} "
           f"batch={args.batch_size} num_evs={args.num_evs} num_stations={args.num_stations} "
           f"chargers_per_station={args.num_chargers_per_station} respawn={args.respawn} "
+          f"traffic_profile={args.traffic_profile} "
           f"ue_background={not args.no_ue_background} "
           f"network={args.network} use_action_mask={args.use_action_mask} "
           f"full_no_mask_experiment={not args.use_action_mask} "

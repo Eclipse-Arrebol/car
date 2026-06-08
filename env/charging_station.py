@@ -170,6 +170,17 @@ class ChargingStation:
     def _choose_respawn_node(self, ev):
         candidates = getattr(self, "legal_respawn_nodes", None)
         if candidates:
+            weights = getattr(self, "respawn_node_weights", None)
+            if weights and len(weights) == len(candidates):
+                pairs = [
+                    (node, max(0.0, float(weight)))
+                    for node, weight in zip(candidates, weights)
+                    if node != ev.curr_node
+                ]
+                valid = [node for node, _weight in pairs]
+                valid_weights = [weight for _node, weight in pairs]
+                if valid and sum(valid_weights) > 0.0:
+                    return random.choices(valid, weights=valid_weights, k=1)[0]
             valid = [node for node in candidates if node != ev.curr_node]
             if valid:
                 return random.choice(valid)
