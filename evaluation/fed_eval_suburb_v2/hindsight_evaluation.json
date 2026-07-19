@@ -1,0 +1,1314 @@
+{
+  "random": {
+    "summary": {
+      "strategy": "random",
+      "episodes": 20,
+      "steps_per_episode": 144,
+      "num_evs": 40,
+      "num_stations": 4,
+      "num_chargers_per_station": 8,
+      "respawn": true,
+      "grid_variant": "suburb",
+      "use_action_mask": false,
+      "epsilon": null,
+      "events": 9153,
+      "abandoned": 0,
+      "avg_trip": 0.6874127348702085,
+      "avg_queue": 0.040077934374886263,
+      "avg_fee": 54.914648942975504,
+      "avg_reward": -0.7373469208386785,
+      "action_counts": [
+        2325,
+        2393,
+        2318,
+        2467
+      ]
+    },
+    "episodes": [
+      {
+        "episode": 1,
+        "events": 451,
+        "abandoned": 0,
+        "avg_trip": 0.6646608071914865,
+        "avg_queue": 0.040280857354028095,
+        "avg_fee": 54.22217441272884,
+        "avg_reward": -0.7200027112036399,
+        "action_counts": [
+          123,
+          108,
+          120,
+          120
+        ]
+      },
+      {
+        "episode": 2,
+        "events": 452,
+        "abandoned": 0,
+        "avg_trip": 0.7159109132568979,
+        "avg_queue": 0.03060471976401179,
+        "avg_fee": 55.48943128072165,
+        "avg_reward": -0.7364794812751788,
+        "action_counts": [
+          97,
+          114,
+          127,
+          135
+        ]
+      },
+      {
+        "episode": 3,
+        "events": 466,
+        "abandoned": 0,
+        "avg_trip": 0.6945300946996376,
+        "avg_queue": 0.02610872675250358,
+        "avg_fee": 55.14918947828733,
+        "avg_reward": -0.7101083842271776,
+        "action_counts": [
+          129,
+          107,
+          127,
+          123
+        ]
+      },
+      {
+        "episode": 4,
+        "events": 439,
+        "abandoned": 0,
+        "avg_trip": 0.6850448169222939,
+        "avg_queue": 0.05504935459377373,
+        "avg_fee": 54.7992400440333,
+        "avg_reward": -0.7705856407768742,
+        "action_counts": [
+          97,
+          136,
+          117,
+          107
+        ]
+      },
+      {
+        "episode": 5,
+        "events": 465,
+        "abandoned": 0,
+        "avg_trip": 0.691004012927795,
+        "avg_queue": 0.02974910394265232,
+        "avg_fee": 54.19373096410771,
+        "avg_reward": -0.7133023247321346,
+        "action_counts": [
+          138,
+          113,
+          122,
+          111
+        ]
+      },
+      {
+        "episode": 6,
+        "events": 453,
+        "abandoned": 0,
+        "avg_trip": 0.6792476927850775,
+        "avg_queue": 0.03384841795437821,
+        "avg_fee": 54.86074640837769,
+        "avg_reward": -0.716892317683769,
+        "action_counts": [
+          123,
+          120,
+          112,
+          113
+        ]
+      },
+      {
+        "episode": 7,
+        "events": 467,
+        "abandoned": 0,
+        "avg_trip": 0.6655935493139282,
+        "avg_queue": 0.016773733047822988,
+        "avg_fee": 55.274840217620486,
+        "avg_reward": -0.6685740726197864,
+        "action_counts": [
+          116,
+          114,
+          119,
+          137
+        ]
+      },
+      {
+        "episode": 8,
+        "events": 463,
+        "abandoned": 0,
+        "avg_trip": 0.6859341463388272,
+        "avg_queue": 0.014398848092152632,
+        "avg_fee": 54.898638611941195,
+        "avg_reward": -0.6758565625643248,
+        "action_counts": [
+          120,
+          135,
+          102,
+          124
+        ]
+      },
+      {
+        "episode": 9,
+        "events": 453,
+        "abandoned": 0,
+        "avg_trip": 0.6884629004990229,
+        "avg_queue": 0.06328182487122885,
+        "avg_fee": 55.055220783264495,
+        "avg_reward": -0.7931010911389905,
+        "action_counts": [
+          120,
+          110,
+          119,
+          122
+        ]
+      },
+      {
+        "episode": 10,
+        "events": 457,
+        "abandoned": 0,
+        "avg_trip": 0.688852991301324,
+        "avg_queue": 0.031728665207877454,
+        "avg_fee": 54.824228963434145,
+        "avg_reward": -0.7184166465978413,
+        "action_counts": [
+          128,
+          124,
+          117,
+          105
+        ]
+      },
+      {
+        "episode": 11,
+        "events": 457,
+        "abandoned": 0,
+        "avg_trip": 0.6768691630061899,
+        "avg_queue": 0.06017505470459523,
+        "avg_fee": 54.74530403171023,
+        "avg_reward": -0.776841772653765,
+        "action_counts": [
+          113,
+          129,
+          115,
+          118
+        ]
+      },
+      {
+        "episode": 12,
+        "events": 462,
+        "abandoned": 0,
+        "avg_trip": 0.6589583678002582,
+        "avg_queue": 0.03318903318903318,
+        "avg_fee": 54.62378999528803,
+        "avg_reward": -0.7006190895420253,
+        "action_counts": [
+          119,
+          119,
+          110,
+          135
+        ]
+      },
+      {
+        "episode": 13,
+        "events": 468,
+        "abandoned": 0,
+        "avg_trip": 0.7060181428181672,
+        "avg_queue": 0.04273504273504275,
+        "avg_fee": 55.0257357924894,
+        "avg_reward": -0.7567720620266242,
+        "action_counts": [
+          124,
+          130,
+          117,
+          112
+        ]
+      },
+      {
+        "episode": 14,
+        "events": 461,
+        "abandoned": 0,
+        "avg_trip": 0.6933752420302491,
+        "avg_queue": 0.040853217642805514,
+        "avg_fee": 54.818746692401355,
+        "avg_reward": -0.742988106818749,
+        "action_counts": [
+          106,
+          123,
+          116,
+          133
+        ]
+      },
+      {
+        "episode": 15,
+        "events": 456,
+        "abandoned": 0,
+        "avg_trip": 0.6720387342238942,
+        "avg_queue": 0.020833333333333336,
+        "avg_fee": 55.210418123444214,
+        "avg_reward": -0.682372806573661,
+        "action_counts": [
+          123,
+          120,
+          110,
+          120
+        ]
+      },
+      {
+        "episode": 16,
+        "events": 454,
+        "abandoned": 0,
+        "avg_trip": 0.6978511264309227,
+        "avg_queue": 0.06497797356828196,
+        "avg_fee": 55.19223075800299,
+        "avg_reward": -0.8039882369764698,
+        "action_counts": [
+          117,
+          108,
+          111,
+          135
+        ]
+      },
+      {
+        "episode": 17,
+        "events": 446,
+        "abandoned": 0,
+        "avg_trip": 0.6999761264701624,
+        "avg_queue": 0.07286995515695066,
+        "avg_fee": 55.39205765689415,
+        "avg_reward": -0.824637974685424,
+        "action_counts": [
+          109,
+          103,
+          111,
+          138
+        ]
+      },
+      {
+        "episode": 18,
+        "events": 466,
+        "abandoned": 0,
+        "avg_trip": 0.692612683228862,
+        "avg_queue": 0.02825464949928469,
+        "avg_fee": 54.95051045101807,
+        "avg_reward": -0.7132239413972321,
+        "action_counts": [
+          113,
+          115,
+          123,
+          129
+        ]
+      },
+      {
+        "episode": 19,
+        "events": 459,
+        "abandoned": 0,
+        "avg_trip": 0.6968854775098254,
+        "avg_queue": 0.05555555555555557,
+        "avg_fee": 54.963778619970746,
+        "avg_reward": -0.780448947223752,
+        "action_counts": [
+          114,
+          122,
+          111,
+          129
+        ]
+      },
+      {
+        "episode": 20,
+        "events": 458,
+        "abandoned": 0,
+        "avg_trip": 0.6945681344734291,
+        "avg_queue": 0.04330422125181949,
+        "avg_fee": 54.61175517883948,
+        "avg_reward": -0.7489409616128412,
+        "action_counts": [
+          96,
+          143,
+          112,
+          121
+        ]
+      }
+    ]
+  },
+  "shortest": {
+    "summary": {
+      "strategy": "shortest",
+      "episodes": 20,
+      "steps_per_episode": 144,
+      "num_evs": 40,
+      "num_stations": 4,
+      "num_chargers_per_station": 8,
+      "respawn": true,
+      "grid_variant": "suburb",
+      "use_action_mask": false,
+      "epsilon": null,
+      "events": 9167,
+      "abandoned": 33,
+      "avg_trip": 0.27654935512280243,
+      "avg_queue": 0.49409112395912824,
+      "avg_fee": 51.46721402776724,
+      "avg_reward": -1.5116517022271905,
+      "action_counts": [
+        3914,
+        1108,
+        1041,
+        3557
+      ]
+    },
+    "episodes": [
+      {
+        "episode": 1,
+        "events": 424,
+        "abandoned": 1,
+        "avg_trip": 0.27675820507108373,
+        "avg_queue": 0.5817610062893084,
+        "avg_fee": 50.66746062764799,
+        "avg_reward": -1.7156170330526104,
+        "action_counts": [
+          193,
+          44,
+          49,
+          160
+        ]
+      },
+      {
+        "episode": 2,
+        "events": 439,
+        "abandoned": 21,
+        "avg_trip": 0.2737410189015597,
+        "avg_queue": 0.5523917995444191,
+        "avg_fee": 51.37943788231066,
+        "avg_reward": -1.6466228983794502,
+        "action_counts": [
+          213,
+          44,
+          53,
+          171
+        ]
+      },
+      {
+        "episode": 3,
+        "events": 455,
+        "abandoned": 0,
+        "avg_trip": 0.2934324232271708,
+        "avg_queue": 0.5065934065934062,
+        "avg_fee": 51.29627857673488,
+        "avg_reward": -1.5521863778476956,
+        "action_counts": [
+          204,
+          53,
+          45,
+          174
+        ]
+      },
+      {
+        "episode": 4,
+        "events": 438,
+        "abandoned": 0,
+        "avg_trip": 0.269268546594767,
+        "avg_queue": 0.540715372907154,
+        "avg_fee": 51.653666000283515,
+        "avg_reward": -1.6169082685152654,
+        "action_counts": [
+          173,
+          54,
+          40,
+          193
+        ]
+      },
+      {
+        "episode": 5,
+        "events": 460,
+        "abandoned": 0,
+        "avg_trip": 0.2752624264838064,
+        "avg_queue": 0.5141304347826088,
+        "avg_fee": 51.69228173902783,
+        "avg_reward": -1.5586080008540795,
+        "action_counts": [
+          189,
+          57,
+          45,
+          189
+        ]
+      },
+      {
+        "episode": 6,
+        "events": 450,
+        "abandoned": 0,
+        "avg_trip": 0.2720806536776503,
+        "avg_queue": 0.5088888888888887,
+        "avg_fee": 51.300709441353746,
+        "avg_reward": -1.5428757877801775,
+        "action_counts": [
+          193,
+          47,
+          56,
+          173
+        ]
+      },
+      {
+        "episode": 7,
+        "events": 452,
+        "abandoned": 0,
+        "avg_trip": 0.2740427018186641,
+        "avg_queue": 0.5051622418879059,
+        "avg_fee": 51.031424266420906,
+        "avg_reward": -1.5346317734813417,
+        "action_counts": [
+          201,
+          59,
+          48,
+          171
+        ]
+      },
+      {
+        "episode": 8,
+        "events": 451,
+        "abandoned": 0,
+        "avg_trip": 0.27691460568032344,
+        "avg_queue": 0.5288248337028825,
+        "avg_fee": 51.55120469396304,
+        "avg_reward": -1.593888407850123,
+        "action_counts": [
+          189,
+          55,
+          41,
+          184
+        ]
+      },
+      {
+        "episode": 9,
+        "events": 443,
+        "abandoned": 1,
+        "avg_trip": 0.278176606100049,
+        "avg_queue": 0.5650865312264863,
+        "avg_fee": 50.95286939019344,
+        "avg_reward": -1.6782393624952778,
+        "action_counts": [
+          200,
+          52,
+          42,
+          169
+        ]
+      },
+      {
+        "episode": 10,
+        "events": 473,
+        "abandoned": 0,
+        "avg_trip": 0.2788343089008486,
+        "avg_queue": 0.41684284707540525,
+        "avg_fee": 52.30626318677721,
+        "avg_reward": -1.3340485706478562,
+        "action_counts": [
+          183,
+          59,
+          67,
+          186
+        ]
+      },
+      {
+        "episode": 11,
+        "events": 455,
+        "abandoned": 4,
+        "avg_trip": 0.28442058544139764,
+        "avg_queue": 0.4985347985347984,
+        "avg_fee": 51.71407679347728,
+        "avg_reward": -1.5282954195542384,
+        "action_counts": [
+          206,
+          51,
+          55,
+          170
+        ]
+      },
+      {
+        "episode": 12,
+        "events": 469,
+        "abandoned": 0,
+        "avg_trip": 0.2865602000836986,
+        "avg_queue": 0.44349680170575745,
+        "avg_fee": 52.09622914041839,
+        "avg_reward": -1.4014457002249656,
+        "action_counts": [
+          190,
+          50,
+          56,
+          191
+        ]
+      },
+      {
+        "episode": 13,
+        "events": 492,
+        "abandoned": 0,
+        "avg_trip": 0.27669433704054325,
+        "avg_queue": 0.4329268292682926,
+        "avg_fee": 51.290004768488856,
+        "avg_reward": -1.367290442989493,
+        "action_counts": [
+          200,
+          70,
+          67,
+          175
+        ]
+      },
+      {
+        "episode": 14,
+        "events": 487,
+        "abandoned": 0,
+        "avg_trip": 0.2743153649995054,
+        "avg_queue": 0.42402464065708423,
+        "avg_fee": 51.933279549035376,
+        "avg_reward": -1.3466827534894081,
+        "action_counts": [
+          205,
+          52,
+          63,
+          188
+        ]
+      },
+      {
+        "episode": 15,
+        "events": 461,
+        "abandoned": 0,
+        "avg_trip": 0.27251036291574054,
+        "avg_queue": 0.4663774403470717,
+        "avg_fee": 50.90424667439524,
+        "avg_reward": -1.4419253157966114,
+        "action_counts": [
+          192,
+          54,
+          60,
+          173
+        ]
+      },
+      {
+        "episode": 16,
+        "events": 480,
+        "abandoned": 0,
+        "avg_trip": 0.27016858969320323,
+        "avg_queue": 0.4520833333333333,
+        "avg_fee": 51.1306412237195,
+        "avg_reward": -1.407373705420872,
+        "action_counts": [
+          195,
+          73,
+          39,
+          191
+        ]
+      },
+      {
+        "episode": 17,
+        "events": 473,
+        "abandoned": 0,
+        "avg_trip": 0.2794501622267065,
+        "avg_queue": 0.4277660324171954,
+        "avg_fee": 51.786700286399416,
+        "avg_reward": -1.3585762545703137,
+        "action_counts": [
+          189,
+          60,
+          58,
+          189
+        ]
+      },
+      {
+        "episode": 18,
+        "events": 468,
+        "abandoned": 0,
+        "avg_trip": 0.284944163208032,
+        "avg_queue": 0.45227920227920226,
+        "avg_fee": 51.493774280103786,
+        "avg_reward": -1.4191419567098638,
+        "action_counts": [
+          200,
+          59,
+          55,
+          176
+        ]
+      },
+      {
+        "episode": 19,
+        "events": 440,
+        "abandoned": 6,
+        "avg_trip": 0.27123447922581184,
+        "avg_queue": 0.6098484848484845,
+        "avg_fee": 51.30342028415379,
+        "avg_reward": -1.779852550740637,
+        "action_counts": [
+          203,
+          57,
+          52,
+          154
+        ]
+      },
+      {
+        "episode": 20,
+        "events": 457,
+        "abandoned": 0,
+        "avg_trip": 0.26150251581515194,
+        "avg_queue": 0.4908825674690008,
+        "avg_fee": 51.72477136138668,
+        "avg_reward": -1.494517511090974,
+        "action_counts": [
+          196,
+          58,
+          50,
+          180
+        ]
+      }
+    ]
+  },
+  "greedy": {
+    "summary": {
+      "strategy": "greedy",
+      "episodes": 20,
+      "steps_per_episode": 144,
+      "num_evs": 40,
+      "num_stations": 4,
+      "num_chargers_per_station": 8,
+      "respawn": true,
+      "grid_variant": "suburb",
+      "use_action_mask": false,
+      "epsilon": null,
+      "events": 10811,
+      "abandoned": 0,
+      "avg_trip": 0.423473241899238,
+      "avg_queue": 0.06001603305275487,
+      "avg_fee": 53.890158704801536,
+      "avg_reward": -0.5990805800107477,
+      "action_counts": [
+        3217,
+        2727,
+        2056,
+        3086
+      ]
+    },
+    "episodes": [
+      {
+        "episode": 1,
+        "events": 519,
+        "abandoned": 0,
+        "avg_trip": 0.434474846807704,
+        "avg_queue": 0.06711624919717411,
+        "avg_fee": 53.344940228545276,
+        "avg_reward": -0.6216966893572086,
+        "action_counts": [
+          159,
+          132,
+          98,
+          144
+        ]
+      },
+      {
+        "episode": 2,
+        "events": 542,
+        "abandoned": 0,
+        "avg_trip": 0.4069161146879298,
+        "avg_queue": 0.06826568265682659,
+        "avg_fee": 54.032748360406366,
+        "avg_reward": -0.6075115492358887,
+        "action_counts": [
+          164,
+          138,
+          104,
+          156
+        ]
+      },
+      {
+        "episode": 3,
+        "events": 544,
+        "abandoned": 0,
+        "avg_trip": 0.43119388402426645,
+        "avg_queue": 0.061580882352941214,
+        "avg_fee": 54.57641346339775,
+        "avg_reward": -0.6101987122433784,
+        "action_counts": [
+          161,
+          146,
+          92,
+          160
+        ]
+      },
+      {
+        "episode": 4,
+        "events": 519,
+        "abandoned": 0,
+        "avg_trip": 0.4384744761266251,
+        "avg_queue": 0.06101477199743098,
+        "avg_fee": 53.60021797893198,
+        "avg_reward": -0.6108841074653584,
+        "action_counts": [
+          148,
+          138,
+          92,
+          153
+        ]
+      },
+      {
+        "episode": 5,
+        "events": 554,
+        "abandoned": 0,
+        "avg_trip": 0.40484650699357616,
+        "avg_queue": 0.0670878459687124,
+        "avg_fee": 53.83988081095055,
+        "avg_reward": -0.6027194145282785,
+        "action_counts": [
+          161,
+          142,
+          99,
+          163
+        ]
+      },
+      {
+        "episode": 6,
+        "events": 532,
+        "abandoned": 0,
+        "avg_trip": 0.4125618253027338,
+        "avg_queue": 0.06109022556390981,
+        "avg_fee": 54.01266737814829,
+        "avg_reward": -0.5944599266717002,
+        "action_counts": [
+          163,
+          132,
+          99,
+          151
+        ]
+      },
+      {
+        "episode": 7,
+        "events": 533,
+        "abandoned": 0,
+        "avg_trip": 0.4226950171363776,
+        "avg_queue": 0.07035647279549716,
+        "avg_fee": 53.57839814685329,
+        "avg_reward": -0.6219150564760233,
+        "action_counts": [
+          157,
+          140,
+          99,
+          155
+        ]
+      },
+      {
+        "episode": 8,
+        "events": 529,
+        "abandoned": 0,
+        "avg_trip": 0.4474382974737525,
+        "avg_queue": 0.06112161310649025,
+        "avg_fee": 53.57406573426083,
+        "avg_reward": -0.6172369756217012,
+        "action_counts": [
+          163,
+          128,
+          97,
+          151
+        ]
+      },
+      {
+        "episode": 9,
+        "events": 541,
+        "abandoned": 0,
+        "avg_trip": 0.4315950431369956,
+        "avg_queue": 0.059149722735674676,
+        "avg_fee": 53.87971387454926,
+        "avg_reward": -0.6026113070877842,
+        "action_counts": [
+          163,
+          129,
+          110,
+          154
+        ]
+      },
+      {
+        "episode": 10,
+        "events": 538,
+        "abandoned": 0,
+        "avg_trip": 0.414335689583624,
+        "avg_queue": 0.06009913258983893,
+        "avg_fee": 53.44563606095317,
+        "avg_reward": -0.5916065861345582,
+        "action_counts": [
+          162,
+          130,
+          108,
+          150
+        ]
+      },
+      {
+        "episode": 11,
+        "events": 549,
+        "abandoned": 0,
+        "avg_trip": 0.4178417589667084,
+        "avg_queue": 0.05160898603521554,
+        "avg_fee": 53.57235801971957,
+        "avg_reward": -0.5744376633160828,
+        "action_counts": [
+          161,
+          137,
+          110,
+          153
+        ]
+      },
+      {
+        "episode": 12,
+        "events": 543,
+        "abandoned": 0,
+        "avg_trip": 0.42291157756063563,
+        "avg_queue": 0.04573357888275017,
+        "avg_fee": 54.20423759792413,
+        "avg_reward": -0.5660538473710321,
+        "action_counts": [
+          158,
+          136,
+          103,
+          161
+        ]
+      },
+      {
+        "episode": 13,
+        "events": 563,
+        "abandoned": 0,
+        "avg_trip": 0.4287504602923186,
+        "avg_queue": 0.04914150384843105,
+        "avg_fee": 54.10612600040531,
+        "avg_reward": -0.5777974281876082,
+        "action_counts": [
+          169,
+          144,
+          114,
+          149
+        ]
+      },
+      {
+        "episode": 14,
+        "events": 546,
+        "abandoned": 0,
+        "avg_trip": 0.4222090261123979,
+        "avg_queue": 0.06257631257631262,
+        "avg_fee": 54.20026282468618,
+        "avg_reward": -0.6051870606912784,
+        "action_counts": [
+          163,
+          136,
+          102,
+          156
+        ]
+      },
+      {
+        "episode": 15,
+        "events": 536,
+        "abandoned": 0,
+        "avg_trip": 0.4099085607834864,
+        "avg_queue": 0.061256218905472656,
+        "avg_fee": 54.023483220232045,
+        "avg_reward": -0.5930539411547074,
+        "action_counts": [
+          158,
+          137,
+          105,
+          151
+        ]
+      },
+      {
+        "episode": 16,
+        "events": 539,
+        "abandoned": 0,
+        "avg_trip": 0.43369972320580896,
+        "avg_queue": 0.06648113790970935,
+        "avg_fee": 54.37614154487354,
+        "avg_reward": -0.6228406689831485,
+        "action_counts": [
+          154,
+          140,
+          103,
+          155
+        ]
+      },
+      {
+        "episode": 17,
+        "events": 538,
+        "abandoned": 0,
+        "avg_trip": 0.4303536481572198,
+        "avg_queue": 0.054832713754646864,
+        "avg_fee": 53.804506092825505,
+        "avg_reward": -0.5913660958691689,
+        "action_counts": [
+          158,
+          133,
+          108,
+          153
+        ]
+      },
+      {
+        "episode": 18,
+        "events": 550,
+        "abandoned": 0,
+        "avg_trip": 0.413572515005446,
+        "avg_queue": 0.059090909090909104,
+        "avg_fee": 53.85956121813525,
+        "avg_reward": -0.5899815841217986,
+        "action_counts": [
+          169,
+          131,
+          106,
+          159
+        ]
+      },
+      {
+        "episode": 19,
+        "events": 555,
+        "abandoned": 0,
+        "avg_trip": 0.42312886331829463,
+        "avg_queue": 0.05315315315315318,
+        "avg_fee": 54.035834041634914,
+        "avg_reward": -0.5831433566418238,
+        "action_counts": [
+          165,
+          137,
+          105,
+          160
+        ]
+      },
+      {
+        "episode": 20,
+        "events": 541,
+        "abandoned": 0,
+        "avg_trip": 0.4243443244964454,
+        "avg_queue": 0.06069008009858288,
+        "avg_fee": 53.67829308073971,
+        "avg_reward": -0.600615425450633,
+        "action_counts": [
+          161,
+          141,
+          102,
+          152
+        ]
+      }
+    ]
+  },
+  "model": {
+    "summary": {
+      "strategy": "model",
+      "episodes": 20,
+      "steps_per_episode": 144,
+      "num_evs": 40,
+      "num_stations": 4,
+      "num_chargers_per_station": 8,
+      "respawn": true,
+      "grid_variant": "suburb",
+      "use_action_mask": false,
+      "epsilon": 0.0,
+      "events": 11328,
+      "abandoned": 0,
+      "avg_trip": 0.34913273709027426,
+      "avg_queue": 0.07491760828625178,
+      "avg_fee": 53.341789243265104,
+      "avg_reward": -0.5811865056596797,
+      "action_counts": [
+        3607,
+        2599,
+        1922,
+        3476
+      ]
+    },
+    "episodes": [
+      {
+        "episode": 1,
+        "events": 552,
+        "abandoned": 0,
+        "avg_trip": 0.34782766512093566,
+        "avg_queue": 0.07306763285024155,
+        "avg_fee": 53.41595614604518,
+        "avg_reward": -0.5761617785015114,
+        "action_counts": [
+          181,
+          125,
+          96,
+          164
+        ]
+      },
+      {
+        "episode": 2,
+        "events": 563,
+        "abandoned": 0,
+        "avg_trip": 0.36346371026641405,
+        "avg_queue": 0.07252812314979273,
+        "avg_fee": 53.78975592752027,
+        "avg_reward": -0.5868259764966649,
+        "action_counts": [
+          178,
+          125,
+          102,
+          176
+        ]
+      },
+      {
+        "episode": 3,
+        "events": 566,
+        "abandoned": 0,
+        "avg_trip": 0.3573499180866966,
+        "avg_queue": 0.08804475853945816,
+        "avg_fee": 52.77969647077033,
+        "avg_reward": -0.6160114231739457,
+        "action_counts": [
+          187,
+          138,
+          84,
+          171
+        ]
+      },
+      {
+        "episode": 4,
+        "events": 543,
+        "abandoned": 0,
+        "avg_trip": 0.35047287435681007,
+        "avg_queue": 0.08502148557397168,
+        "avg_fee": 53.05621536414048,
+        "avg_reward": -0.6050058783107262,
+        "action_counts": [
+          171,
+          129,
+          86,
+          171
+        ]
+      },
+      {
+        "episode": 5,
+        "events": 585,
+        "abandoned": 0,
+        "avg_trip": 0.3374219712506917,
+        "avg_queue": 0.06581196581196581,
+        "avg_fee": 53.0204578500631,
+        "avg_reward": -0.5506963623304327,
+        "action_counts": [
+          177,
+          138,
+          98,
+          181
+        ]
+      },
+      {
+        "episode": 6,
+        "events": 552,
+        "abandoned": 0,
+        "avg_trip": 0.35360678186159106,
+        "avg_queue": 0.08031400966183569,
+        "avg_fee": 53.509133383415985,
+        "avg_reward": -0.5974843738258193,
+        "action_counts": [
+          178,
+          126,
+          90,
+          172
+        ]
+      },
+      {
+        "episode": 7,
+        "events": 567,
+        "abandoned": 0,
+        "avg_trip": 0.3512225217295604,
+        "avg_queue": 0.0714285714285714,
+        "avg_fee": 52.85773348833295,
+        "avg_reward": -0.5729288356338647,
+        "action_counts": [
+          182,
+          134,
+          90,
+          173
+        ]
+      },
+      {
+        "episode": 8,
+        "events": 565,
+        "abandoned": 0,
+        "avg_trip": 0.3437466013973593,
+        "avg_queue": 0.07227138643067844,
+        "avg_fee": 53.22428944025156,
+        "avg_reward": -0.5708839870982557,
+        "action_counts": [
+          183,
+          129,
+          92,
+          174
+        ]
+      },
+      {
+        "episode": 9,
+        "events": 575,
+        "abandoned": 0,
+        "avg_trip": 0.35157626040554524,
+        "avg_queue": 0.060000000000000026,
+        "avg_fee": 53.99525931822356,
+        "avg_reward": -0.5497821165155063,
+        "action_counts": [
+          181,
+          133,
+          101,
+          171
+        ]
+      },
+      {
+        "episode": 10,
+        "events": 566,
+        "abandoned": 0,
+        "avg_trip": 0.33898119004170324,
+        "avg_queue": 0.08068315665488807,
+        "avg_fee": 53.38553435979904,
+        "avg_reward": -0.5878860352496922,
+        "action_counts": [
+          182,
+          124,
+          98,
+          177
+        ]
+      },
+      {
+        "episode": 11,
+        "events": 568,
+        "abandoned": 0,
+        "avg_trip": 0.3542942192245967,
+        "avg_queue": 0.07247652582159618,
+        "avg_fee": 53.69053473010407,
+        "avg_reward": -0.5800754881011145,
+        "action_counts": [
+          178,
+          137,
+          94,
+          175
+        ]
+      },
+      {
+        "episode": 12,
+        "events": 567,
+        "abandoned": 0,
+        "avg_trip": 0.34555751288486325,
+        "avg_queue": 0.06907701352145797,
+        "avg_fee": 53.32046240578402,
+        "avg_reward": -0.5649126368383124,
+        "action_counts": [
+          178,
+          130,
+          99,
+          175
+        ]
+      },
+      {
+        "episode": 13,
+        "events": 588,
+        "abandoned": 0,
+        "avg_trip": 0.346156680759892,
+        "avg_queue": 0.05980725623582769,
+        "avg_fee": 53.82504035190633,
+        "avg_reward": -0.5450672099757522,
+        "action_counts": [
+          184,
+          140,
+          100,
+          181
+        ]
+      },
+      {
+        "episode": 14,
+        "events": 564,
+        "abandoned": 0,
+        "avg_trip": 0.3516558228665813,
+        "avg_queue": 0.08687943262411342,
+        "avg_fee": 53.28712392257882,
+        "avg_reward": -0.6109038328592886,
+        "action_counts": [
+          185,
+          124,
+          101,
+          173
+        ]
+      },
+      {
+        "episode": 15,
+        "events": 560,
+        "abandoned": 0,
+        "avg_trip": 0.33992471323176615,
+        "avg_queue": 0.06964285714285717,
+        "avg_fee": 53.415485663094216,
+        "avg_reward": -0.5626517234318786,
+        "action_counts": [
+          178,
+          123,
+          97,
+          177
+        ]
+      },
+      {
+        "episode": 16,
+        "events": 567,
+        "abandoned": 0,
+        "avg_trip": 0.351076639561011,
+        "avg_queue": 0.08112874779541443,
+        "avg_fee": 53.141336039957494,
+        "avg_reward": -0.5965247948701015,
+        "action_counts": [
+          179,
+          134,
+          93,
+          172
+        ]
+      },
+      {
+        "episode": 17,
+        "events": 559,
+        "abandoned": 0,
+        "avg_trip": 0.36230013909100023,
+        "avg_queue": 0.08199165175909359,
+        "avg_fee": 53.24981168735991,
+        "avg_reward": -0.6066292728638001,
+        "action_counts": [
+          177,
+          128,
+          92,
+          174
+        ]
+      },
+      {
+        "episode": 18,
+        "events": 574,
+        "abandoned": 0,
+        "avg_trip": 0.35270518674062074,
+        "avg_queue": 0.06794425087108011,
+        "avg_fee": 53.250804962969475,
+        "avg_reward": -0.5669624126071445,
+        "action_counts": [
+          182,
+          128,
+          103,
+          175
+        ]
+      },
+      {
+        "episode": 19,
+        "events": 576,
+        "abandoned": 0,
+        "avg_trip": 0.3457599210770451,
+        "avg_queue": 0.07870370370370358,
+        "avg_fee": 53.71038993921264,
+        "avg_reward": -0.5889030414438553,
+        "action_counts": [
+          184,
+          124,
+          110,
+          169
+        ]
+      },
+      {
+        "episode": 20,
+        "events": 571,
+        "abandoned": 0,
+        "avg_trip": 0.33838280107136914,
+        "avg_queue": 0.08318739054290711,
+        "avg_fee": 52.88716664192661,
+        "avg_reward": -0.5918322290999037,
+        "action_counts": [
+          182,
+          130,
+          96,
+          175
+        ]
+      }
+    ]
+  }
+}

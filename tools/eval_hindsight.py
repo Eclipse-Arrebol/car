@@ -31,7 +31,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 
 from agents.hindsight_dqn_agent import HindsightDQNAgent
 from env.real_env import RealTrafficEnv
-from trainer.trainer import HindsightTrainer
+from trainer.trainer import HindsightTrainer, compute_hindsight_reward
 
 
 def parse_args():
@@ -90,11 +90,11 @@ def _run_policy(args, policy_name, policy_fn):
             _obs, _reward, done, info = _step_with_policy(env, policy_fn)
             steps_run += 1
 
-            for entry in info.get("completed", []):
+            for entry in info.get("charge_started", []):
                 trip = float(entry.get("actual_trip_time_h", 0.0))
                 queue = float(entry.get("actual_queue_time_h", 0.0))
                 fee = float(entry.get("charging_fee", 0.0))
-                reward = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
+                reward = compute_hindsight_reward(trip, queue, fee)
                 ep_trip.append(trip)
                 ep_queue.append(queue)
                 ep_fee.append(fee)

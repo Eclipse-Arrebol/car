@@ -1,0 +1,44 @@
+{
+  "model": {
+    "summary": {
+      "strategy": "model",
+      "episodes": 1,
+      "steps_per_episode": 5,
+      "num_evs": 40,
+      "num_stations": 4,
+      "num_chargers_per_station": 8,
+      "respawn": true,
+      "use_action_mask": false,
+      "epsilon": 0.0,
+      "events": 10,
+      "abandoned": 0,
+      "avg_trip": 0.2593761393142899,
+      "avg_queue": 0.0,
+      "avg_fee": 55.37816533031226,
+      "avg_reward": -0.34927445094131987,
+      "action_counts": [
+        6,
+        0,
+        2,
+        5
+      ]
+    },
+    "episodes": [
+      {
+        "episode": 1,
+        "events": 10,
+        "abandoned": 0,
+        "avg_trip": 0.2593761393142899,
+        "avg_queue": 0.0,
+        "avg_fee": 55.37816533031226,
+        "avg_reward": -0.34927445094131987,
+        "action_counts": [
+          6,
+          0,
+          2,
+          5
+        ]
+      }
+    ]
+  }
+}

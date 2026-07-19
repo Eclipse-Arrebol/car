@@ -28,8 +28,9 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
         pass  # Python < 3.7 或非 TTY 环境,降级跳过
 
 from env.real_env import RealTrafficEnv
+from env.grid_variants import ALL_GRID_VARIANTS
 from agents.hindsight_dqn_agent import HindsightDQNAgent
-from trainer.trainer import HindsightTrainer
+from trainer.trainer import HindsightTrainer, compute_hindsight_reward
 
 # 默认训练规模（与 tests/test_hindsight_train_scale.py 契约一致）
 TRAIN_DEFAULT_NUM_EVS = 80
@@ -86,15 +87,32 @@ def parse_args():
         help="Print Frank–Wolfe UE iteration logs (default: off)",
     )
 
+    p.add_argument(
+        "--grid-variant",
+        type=str,
+        default="ieee33",
+        choices=ALL_GRID_VARIANTS,
+        help="Power-grid scenario: ieee33, old_city, new_city, or suburb",
+    )
+
     # Network / mask switch
     p.add_argument("--network", type=str, default="station_only",
-                   choices=["original", "lightweight", "station_only"],
+                   choices=["original", "lightweight", "station_only", "station_attn"],
                    help="Choose Q-network variant")
     p.add_argument("--use-action-mask", dest="use_action_mask", action="store_true", default=True,
                    help="Enable action mask inside Q network (default True)")
     p.add_argument("--no-use-action-mask", dest="use_action_mask", action="store_false")
 
     # Save strategy
+    p.add_argument("--load-model", type=str, default=None,
+                   help="Optional checkpoint path to continue training from")
+    p.add_argument("--reset-epsilon", action="store_true", default=False,
+                   help="Reset epsilon to 1.0 after loading --load-model")
+    p.add_argument("--epsilon", type=float, default=None,
+                   help="Override epsilon after optional model loading")
+    p.add_argument("--epsilon-decay", type=float, default=0.994,
+                   help="Per-episode epsilon multiplicative decay (from-scratch "
+                        "runs need a slower decay matched to the episode budget)")
     p.add_argument("--save-dir", type=str, default="checkpoints_hindsight")
     p.add_argument("--save-every", type=int, default=50,
                    help="Save a snapshot every N episodes")
@@ -116,6 +134,7 @@ def main():
         cache_dir=os.path.join("map_outputs", "ema_cache"),
         seed=42,
         respawn_after_full_charge=args.respawn,
+        grid_variant=args.grid_variant,
     )
     if not args.no_ue_background:
         net_p = args.ue_net_tntp
@@ -143,25 +162,40 @@ def main():
     station_node_ids = [s.traffic_node_id for s in env.stations]
     print(f"[setup] station_node_ids={station_node_ids}")
     agent = HindsightDQNAgent(
-        num_features=18,
+        num_features=19,
         num_actions=args.num_stations,
         station_node_ids=station_node_ids,
         num_nodes_per_graph=env.num_nodes,
         network_variant=args.network,
         use_action_mask=args.use_action_mask,
+        epsilon_decay=args.epsilon_decay,
     )
+    if args.load_model:
+        if not os.path.isfile(args.load_model):
+            raise FileNotFoundError(f"--load-model not found: {args.load_model}")
+        agent.load_model(args.load_model)
+        print(f"[setup] loaded model: {args.load_model}")
+    if args.reset_epsilon:
+        agent.epsilon = 1.0
+        print("[setup] reset epsilon to 1.000")
+    if args.epsilon is not None:
+        agent.epsilon = float(args.epsilon)
+        print(f"[setup] override epsilon={agent.epsilon:.3f}")
     trainer = HindsightTrainer(env, agent)
 
     os.makedirs(args.save_dir, exist_ok=True)
     print(f"[setup] episodes={args.episodes} steps={args.steps_per_episode} "
           f"batch={args.batch_size} num_evs={args.num_evs} num_stations={args.num_stations} "
           f"chargers_per_station={args.num_chargers_per_station} respawn={args.respawn} "
+          f"grid_variant={args.grid_variant} "
           f"ue_background={not args.no_ue_background} "
           f"network={args.network} use_action_mask={args.use_action_mask} "
-          f"full_no_mask_experiment={not args.use_action_mask}")
+          f"full_no_mask_experiment={not args.use_action_mask} "
+          f"load_model={args.load_model}")
     print(f"[setup] save_dir={args.save_dir} save_every={args.save_every}")
 
     t0 = time.time()
+    mean_field_printed = False
     for episode in range(args.episodes):
         env.reset()
         trainer.pending.clear()
@@ -172,12 +206,15 @@ def main():
         for step in range(args.steps_per_episode):
             done, info = trainer.step_episode()
             steps_run += 1
+            if not mean_field_printed and sum(env.evs_heading_to.values()) > 0:
+                print("mean_field:", env.evs_heading_to)
+                mean_field_printed = True
 
-            for entry in info.get("completed", []):
+            for entry in info.get("charge_started", []):
                 trip = float(entry.get("actual_trip_time_h", 0.0))
                 queue = float(entry.get("actual_queue_time_h", 0.0))
                 fee = float(entry.get("charging_fee", 0.0))
-                reward = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
+                reward = compute_hindsight_reward(trip, queue, fee)
                 ep_trip.append(trip)
                 ep_queue.append(queue)
                 ep_fee.append(fee)

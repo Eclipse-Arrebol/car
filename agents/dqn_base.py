@@ -22,6 +22,7 @@ from collections import deque
 from agents.network import GraphQNetwork
 from agents.network_light import LightweightGraphQNetwork
 from agents.network_station_only import StationOnlyGraphQNetwork
+from agents.network_station_attn import StationAttnGraphQNetwork
 
 
 def _clone_data_to_cpu(data):
@@ -53,11 +54,12 @@ class DQNBase:
             "original": GraphQNetwork,
             "lightweight": LightweightGraphQNetwork,
             "station_only": StationOnlyGraphQNetwork,
+            "station_attn": StationAttnGraphQNetwork,
         }.get(network_variant)
         if net_cls is None:
             raise ValueError(
                 f"Unknown network_variant: {network_variant}. "
-                "Expected one of: original, lightweight, station_only"
+                "Expected one of: original, lightweight, station_only, station_attn"
             )
 
         self.network_variant = network_variant

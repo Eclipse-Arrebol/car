@@ -1,0 +1,140 @@
+{
+  "config": {
+    "model": "checkpoints_station_attn_federated/global_final.pth",
+    "episodes": 10,
+    "steps_per_episode": 144,
+    "num_evs": 40,
+    "num_stations": 4,
+    "num_chargers_per_station": 8,
+    "grid_variant": "old_city",
+    "ue_scale": 1.3,
+    "epsilon": 0.0,
+    "seed": 42
+  },
+  "A": {
+    "mode": "A",
+    "events": 5603,
+    "abandoned": 0,
+    "abandon_rate": 0.0,
+    "avg_trip_h": 0.3363708961837896,
+    "avg_queue_h": 0.09703135225177004,
+    "max_queue_h": 0.9999999999999999,
+    "var_queue_h": 0.027559156670673015,
+    "std_queue_h": 0.1660095077719135,
+    "avg_fee": 90.79156970437603,
+    "avg_reward": -0.7396476685378905,
+    "load_gini": 0.12408823851438133,
+    "action_gini": 0.1352045256744996,
+    "action_counts": [
+      1809,
+      1280,
+      924,
+      1732
+    ],
+    "avg_min_voltage_pu": 0.7875745215277773,
+    "avg_voltage_excursion": 2.2932930701388874,
+    "avg_voltage_violations": 24.241666666666667
+  },
+  "B": {
+    "mode": "B",
+    "events": 5603,
+    "abandoned": 0,
+    "abandon_rate": 0.0,
+    "avg_trip_h": 0.3363708961837896,
+    "avg_queue_h": 0.09703135225177004,
+    "max_queue_h": 0.9999999999999999,
+    "var_queue_h": 0.027559156670673015,
+    "std_queue_h": 0.1660095077719135,
+    "avg_fee": 90.79156970437603,
+    "avg_reward": -0.7396476685378905,
+    "load_gini": 0.12408823851438133,
+    "action_gini": 0.1352045256744996,
+    "action_counts": [
+      1809,
+      1280,
+      924,
+      1732
+    ],
+    "avg_min_voltage_pu": 0.7875745215277773,
+    "avg_voltage_excursion": 2.2932930701388874,
+    "avg_voltage_violations": 24.241666666666667
+  },
+  "C": {
+    "mode": "C",
+    "events": 5613,
+    "abandoned": 0,
+    "abandon_rate": 0.0,
+    "avg_trip_h": 0.34083221014256126,
+    "avg_queue_h": 0.08783181899162715,
+    "max_queue_h": 0.8333333333333333,
+    "var_queue_h": 0.024255007604056533,
+    "std_queue_h": 0.1557401926416445,
+    "avg_fee": 90.97339115883317,
+    "avg_reward": -0.7216379268023136,
+    "load_gini": 0.11842679003896861,
+    "action_gini": 0.12864330326162388,
+    "action_counts": [
+      1799,
+      1324,
+      937,
+      1704
+    ],
+    "avg_min_voltage_pu": 0.7876457916666668,
+    "avg_voltage_excursion": 2.2953868555555568,
+    "avg_voltage_violations": 24.254166666666666
+  },
+  "improvement_pct": {
+    "avg_queue_h": {
+      "C_vs_A": 9.480990470247798,
+      "C_vs_B": 9.480990470247798
+    },
+    "var_queue_h": {
+      "C_vs_A": 11.989296719418784,
+      "C_vs_B": 11.989296719418784
+    },
+    "std_queue_h": {
+      "C_vs_A": 6.185980109270852,
+      "C_vs_B": 6.185980109270852
+    },
+    "max_queue_h": {
+      "C_vs_A": 16.666666666666664,
+      "C_vs_B": 16.666666666666664
+    },
+    "avg_reward": {
+      "C_vs_A": 2.434908200437909,
+      "C_vs_B": 2.434908200437909
+    },
+    "avg_trip_h": {
+      "C_vs_A": -1.3263079563025046,
+      "C_vs_B": -1.3263079563025046
+    },
+    "avg_fee": {
+      "C_vs_A": -0.2002624858774444,
+      "C_vs_B": -0.2002624858774444
+    },
+    "abandon_rate": {
+      "C_vs_A": null,
+      "C_vs_B": null
+    },
+    "load_gini": {
+      "C_vs_A": 4.5624376195465,
+      "C_vs_B": 4.5624376195465
+    },
+    "action_gini": {
+      "C_vs_A": 4.852812714769353,
+      "C_vs_B": 4.852812714769353
+    },
+    "avg_min_voltage_pu": {
+      "C_vs_A": 0.009049320025141203,
+      "C_vs_B": 0.009049320025141203
+    },
+    "avg_voltage_excursion": {
+      "C_vs_A": -0.09130038563028386,
+      "C_vs_B": -0.09130038563028386
+    },
+    "avg_voltage_violations": {
+      "C_vs_A": -0.05156411137847765,
+      "C_vs_B": -0.05156411137847765
+    }
+  }
+}

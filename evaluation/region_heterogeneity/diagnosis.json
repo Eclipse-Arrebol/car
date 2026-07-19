@@ -1,0 +1,68 @@
+{
+  "results": [
+    {
+      "grid_variant": "old_city",
+      "ue_scale": 1.3,
+      "decisions": 1602,
+      "disagree_all_rate": 0.517478152309613,
+      "flip_vs_default": {
+        "old/queue-averse": 0.09550561797752809,
+        "new/fee-averse": 0.39325842696629215,
+        "suburb/trip-averse": 0.20162297128589263
+      },
+      "pairwise_flip_rate": {
+        "trip~queue": 0.27091136079900124,
+        "trip~fee": 0.517478152309613,
+        "queue~fee": 0.315230961298377
+      },
+      "station_cv": {
+        "trip": 0.47625560602034356,
+        "queue": 1.2170867713387366,
+        "fee": 0.11381718773182067
+      }
+    },
+    {
+      "grid_variant": "new_city",
+      "ue_scale": 1.0,
+      "decisions": 1582,
+      "disagree_all_rate": 0.465865992414665,
+      "flip_vs_default": {
+        "old/queue-averse": 0.07395701643489254,
+        "new/fee-averse": 0.36599241466498106,
+        "suburb/trip-averse": 0.17003792667509482
+      },
+      "pairwise_flip_rate": {
+        "trip~queue": 0.23135271807838179,
+        "trip~fee": 0.4633375474083439,
+        "queue~fee": 0.3065739570164349
+      },
+      "station_cv": {
+        "trip": 0.4698611756880242,
+        "queue": 1.2139106227436611,
+        "fee": 0.14445453249673312
+      }
+    },
+    {
+      "grid_variant": "suburb",
+      "ue_scale": 0.7,
+      "decisions": 1571,
+      "disagree_all_rate": 0.475493316359007,
+      "flip_vs_default": {
+        "old/queue-averse": 0.08211330362826226,
+        "new/fee-averse": 0.37492043284532145,
+        "suburb/trip-averse": 0.18714194780394652
+      },
+      "pairwise_flip_rate": {
+        "trip~queue": 0.25143220878421385,
+        "trip~fee": 0.47358370464672184,
+        "queue~fee": 0.30744748567791214
+      },
+      "station_cv": {
+        "trip": 0.4709101988300365,
+        "queue": 1.239299878342696,
+        "fee": 0.15913549730278673
+      }
+    }
+  ],
+  "avg_disagree_all_rate": 0.48627915369442837
+}

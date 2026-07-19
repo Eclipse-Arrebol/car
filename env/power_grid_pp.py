@@ -3,6 +3,8 @@ import time
 
 import pandapower as pp
 
+from env.grid_variants import ALL_GRID_VARIANTS, build_grid_variant
+
 
 IEEE33_STATION_BUSES = {
     0: 6,
@@ -94,12 +96,17 @@ IEEE33_LOAD_DATA = {
 class PPPowerGrid33:
     """Pandapower IEEE 33-bus distribution grid with the legacy PowerGrid interface."""
 
-    _THEVENIN_CACHE = None
+    _THEVENIN_CACHE = {}
 
-    def __init__(self, station_bus_map=None, compute_thevenin=True):
+    def __init__(self, station_bus_map=None, compute_thevenin=True, grid_variant="ieee33"):
+        if grid_variant not in ALL_GRID_VARIANTS:
+            raise ValueError(
+                f"Unknown grid_variant={grid_variant!r}; expected one of {ALL_GRID_VARIANTS}"
+            )
         self.v_nominal_kv = 12.66
         self.v_min = 0.95
         self.v_max = 1.05
+        self.grid_variant = grid_variant
         self.station_bus_map = dict(station_bus_map or IEEE33_STATION_BUSES)
         self.station_power_nodes = {
             station_id: f"Bus_{bus}"
@@ -110,7 +117,7 @@ class PPPowerGrid33:
             for station_id, power_node in self.station_power_nodes.items()
             for bus in [self.station_bus_map[station_id]]
         }
-        self.base_net = self._build_ieee33_net()
+        self.base_net = build_grid_variant(grid_variant, self._build_ieee33_net())
         self.net = copy.deepcopy(self.base_net)
         self.bus_lookup = {
             int(str(row["name"]).split("_")[1]): idx
@@ -131,9 +138,9 @@ class PPPowerGrid33:
         self.last_runpp_time_s = 0.0
         self.thevenin_r_ohm = {}
         if compute_thevenin:
-            if PPPowerGrid33._THEVENIN_CACHE is None:
-                PPPowerGrid33._THEVENIN_CACHE = self._compute_thevenin_resistances()
-            self.thevenin_r_ohm = dict(PPPowerGrid33._THEVENIN_CACHE)
+            if grid_variant not in PPPowerGrid33._THEVENIN_CACHE:
+                PPPowerGrid33._THEVENIN_CACHE[grid_variant] = self._compute_thevenin_resistances()
+            self.thevenin_r_ohm = dict(PPPowerGrid33._THEVENIN_CACHE[grid_variant])
 
     @staticmethod
     def _build_ieee33_net():
@@ -304,5 +311,6 @@ class PPPowerGrid33:
 
 __all__ = [
     "IEEE33_STATION_BUSES",
+    "ALL_GRID_VARIANTS",
     "PPPowerGrid33",
 ]

@@ -10,7 +10,7 @@ from env.base_env import TrafficPowerEnv, setup_background_traffic_and_respawn_n
 from env.entities import EV
 from env.charging_station import ChargingStation
 from env.power_grid import get_tou_multiplier
-from env.power_grid_pp import IEEE33_STATION_BUSES, PPPowerGrid33
+from env.power_grid_pp import ALL_GRID_VARIANTS, IEEE33_STATION_BUSES, PPPowerGrid33
 from env.osm_loader import load_road_network, load_road_network_by_point, load_road_network_from_file
 
 
@@ -50,7 +50,13 @@ class RealTrafficEnv(TrafficPowerEnv):
         background_ue_max_iter: int = 800,
         background_ue_tol: float = 1e-4,
         background_ue_verbose: bool = False,
+        grid_variant: str = "ieee33",
     ):
+        if grid_variant not in ALL_GRID_VARIANTS:
+            raise ValueError(
+                f"Unknown grid_variant={grid_variant!r}; expected one of {ALL_GRID_VARIANTS}"
+            )
+        self.grid_variant = grid_variant
         self.respawn_after_full_charge = respawn_after_full_charge
         self.num_chargers_per_station = max(1, int(num_chargers_per_station))
         self.background_ue_net_tntp = background_ue_net_tntp
@@ -92,13 +98,9 @@ class RealTrafficEnv(TrafficPowerEnv):
         self.charge_trigger_soc = 30.0
         self.station_node_ids = station_nodes
         self.num_stations = num_stations
+        self.evs_heading_to = {i: 0 for i in range(self.num_stations)}
 
-        self.power_grid = PPPowerGrid33(
-            station_bus_map={
-                i: IEEE33_STATION_BUSES[i]
-                for i in range(num_stations)
-            }
-        )
+        self.power_grid = self._build_power_grid()
         self.stations = self._build_charging_stations(station_nodes)
 
         non_station = [n for n in graph.nodes() if n not in station_nodes]
@@ -126,22 +128,19 @@ class RealTrafficEnv(TrafficPowerEnv):
         self._cached_lmp = None
         self._lmp_step_counter = 0
         self._completed_evs_this_step = []
+        self._charge_started_evs_this_step = []
         self._abandoned_evs_this_step = []
         self._arrivals_this_step = []
         self._dispatched_t0_this_step = []
 
         print(f"[RealTrafficEnv] nodes={self.num_nodes}, "
-              f"station_nodes={station_nodes}, EVs={num_evs})")
+              f"station_nodes={station_nodes}, EVs={num_evs}, grid_variant={self.grid_variant})")
 
     def reset(self):
         self._reset_mask_stats_and_print()
-        self.power_grid = PPPowerGrid33(
-            station_bus_map={
-                i: IEEE33_STATION_BUSES[i]
-                for i in range(self.num_stations)
-            }
-        )
+        self.power_grid = self._build_power_grid()
         self.stations = self._build_charging_stations(self.station_node_ids)
+        self.evs_heading_to = {i: 0 for i in range(self.num_stations)}
         setup_background_traffic_and_respawn_nodes(self)
 
         non_station = [n for n in self.traffic_graph.nodes()
@@ -163,10 +162,20 @@ class RealTrafficEnv(TrafficPowerEnv):
         self._cached_lmp = None
         self._lmp_step_counter = 0
         self._completed_evs_this_step = []
+        self._charge_started_evs_this_step = []
         self._abandoned_evs_this_step = []
         self._arrivals_this_step = []
         self._dispatched_t0_this_step = []
         return self.get_graph_state()
+
+    def _build_power_grid(self):
+        return PPPowerGrid33(
+            station_bus_map={
+                i: IEEE33_STATION_BUSES[i]
+                for i in range(self.num_stations)
+            },
+            grid_variant=self.grid_variant,
+        )
 
     def _build_charging_stations(self, station_nodes):
         stations = []
@@ -178,6 +187,6 @@ class RealTrafficEnv(TrafficPowerEnv):
                 num_chargers=self.num_chargers_per_station,
                 respawn_after_full_charge=self.respawn_after_full_charge,
             )
-            station.power_bus_idx = IEEE33_STATION_BUSES[i]
+            station.power_bus_idx = self.power_grid.station_bus_map[i]
             stations.append(station)
         return stations

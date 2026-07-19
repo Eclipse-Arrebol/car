@@ -1,3 +1,4 @@
+import heapq
 import math
 import networkx as nx
 import numpy as np
@@ -12,7 +13,7 @@ from env.charging_station import ChargingStation
 from env.background_traffic import build_daily_profile, build_base_background_flows
 
 
-NODE_FEATURE_DIM = 18
+NODE_FEATURE_DIM = 19
 TOTAL_TIME_MASK_THRESHOLD_H = 1.0
 
 
@@ -65,6 +66,8 @@ class TrafficPowerEnv:
                 respawn_after_full_charge=self.respawn_after_full_charge,
             ),
         ]
+        self.num_stations = len(self.stations)
+        self._reset_mean_field()
 
         self.evs = []
         for i in range(self.num_evs):
@@ -95,6 +98,7 @@ class TrafficPowerEnv:
         self._cached_lmp = None
         self._lmp_step_counter = 0
         self._completed_evs_this_step = []
+        self._charge_started_evs_this_step = []
         self._abandoned_evs_this_step = []
         self._arrivals_this_step = []
         self._dispatched_t0_this_step = []
@@ -138,6 +142,8 @@ class TrafficPowerEnv:
                 respawn_after_full_charge=self.respawn_after_full_charge,
             ),
         ]
+        self.num_stations = len(self.stations)
+        self._reset_mean_field()
         self.evs = []
         for i in range(self.num_evs):
             start_node = random.randint(1, 7)
@@ -154,13 +160,31 @@ class TrafficPowerEnv:
         self._cached_lmp = None
         self._lmp_step_counter = 0
         self._completed_evs_this_step = []
+        self._charge_started_evs_this_step = []
         self._abandoned_evs_this_step = []
         self._arrivals_this_step = []
         self._dispatched_t0_this_step = []
         setup_background_traffic_and_respawn_nodes(self)
         return self.get_graph_state()
 
+    def _reset_mean_field(self):
+        self.evs_heading_to = {i: 0 for i in range(len(self.stations))}
+
+    def _mark_ev_heading_to(self, ev, station_id):
+        self._clear_ev_heading_to(ev)
+        station_id = int(station_id)
+        self.evs_heading_to[station_id] = self.evs_heading_to.get(station_id, 0) + 1
+        ev._heading_to_station_idx = station_id
+
+    def _clear_ev_heading_to(self, ev):
+        station_id = getattr(ev, "_heading_to_station_idx", None)
+        if station_id is None:
+            return
+        self.evs_heading_to[station_id] = max(0, self.evs_heading_to.get(station_id, 0) - 1)
+        ev._heading_to_station_idx = None
+
     def _reset_ev_charging_attempt(self, ev):
+        self._clear_ev_heading_to(ev)
         ev.status = "IDLE"
         ev.target_station_idx = None
         ev.assigned_station = None
@@ -174,6 +198,9 @@ class TrafficPowerEnv:
         ev.low_soc_triggered = ev.soc < self.charge_trigger_soc
         ev.remaining_replans = 1
         ev.abandon_reason = None
+        ev.ready_to_settle = False
+        ev.charge_start_state = None
+        ev.charge_start_station_features = None
 
     def should_request_charge_decision(self, ev):
         if ev.status != "IDLE":
@@ -211,9 +238,13 @@ class TrafficPowerEnv:
 
     def _commit_arrival_to_waiting(self, ev, target_station, arrivals_this_step):
         """到站后直接入队等待（不再经过 t2 accept/reject 决策）。"""
+        self._clear_ev_heading_to(ev)
         target_station.queue.append(ev)
         ev.status = "WAITING"
         ev.wait_time_h = 0.0
+        ev.arrival_time = self.time_step * self.step_duration_h
+        ev.ready_to_settle = False
+        ev.charge_start_state = None
         arrivals_this_step[target_station.id] += 1
         self._arrivals_this_step.append(ev)
 
@@ -571,7 +602,8 @@ class TrafficPowerEnv:
         x[:, 7] = self.tou_multiplier
         x[:, 13] = self.price_noise
 
-        for station in self.stations:
+        total_heading_evs = max(1, sum(self.evs_heading_to.values()))
+        for i, station in enumerate(self.stations):
             node_idx = station.traffic_node_id
             x[node_idx, 1] = 1.0
             x[node_idx, 2] = len(station.queue)
@@ -587,6 +619,7 @@ class TrafficPowerEnv:
             ) / max(1.0, station.max_queue_len + station.num_chargers)
             x[node_idx, 15] = min(2.0, queue_wait_ratio)
             x[node_idx, 16] = station_pressure
+            x[node_idx, 18] = self.evs_heading_to.get(i, 0) / total_heading_evs
 
         data = Data(x=x, edge_index=self.edge_index, edge_attr=self.edge_attr)
         return data
@@ -605,9 +638,17 @@ class TrafficPowerEnv:
                 2.0, metrics["queue_time_h"] / max(1e-6, station.max_wait_time_h)
             )
             pending = 0 if pending_counts is None else pending_counts.get(station.id, 0)
+            total_heading = max(
+                1,
+                sum(self.evs_heading_to.values())
+                + (sum(pending_counts.values()) if pending_counts else 0),
+            )
             data.x[station.traffic_node_id, 16] = (
                 len(station.queue) + len(station.connected_evs) + station.predicted_arrivals + pending
             ) / max(1.0, station.max_queue_len + station.num_chargers)
+            data.x[station.traffic_node_id, 18] = (
+                self.evs_heading_to.get(station.id, 0) + pending
+            ) / total_heading
             data.x[station.traffic_node_id, 17] = float(
                 max(0, station.num_chargers - len(station.connected_evs)) / station.num_chargers
             )
@@ -618,6 +659,134 @@ class TrafficPowerEnv:
                 if pc > 0:
                     data.x[station.traffic_node_id, 2] += pc
         return data
+
+    # ------------------------------------------------------------------
+    # Oracle 上界实验：理想到达等待（仅评估用，可"作弊"读全局真值）
+    # ------------------------------------------------------------------
+    def _ev_eta_to_station_hours(self, ev, station):
+        """该 EV 到达 station 的真实剩余行驶时间（小时）。
+
+        在途 EV（MOVING_TO_CHARGE）按当前边剩余时间 + 剩余 path 累加；
+        其余（如刚决策、尚未上路的候选 EV）按最短路估计，与派发时一致。
+        """
+        if ev.status == "MOVING_TO_CHARGE" and (ev.path or ev.remaining_edge_time_h > 1e-9):
+            t = max(0.0, float(ev.remaining_edge_time_h))
+            if ev.current_edge_target is not None:
+                node = ev.current_edge_target
+                # 在途时 path[0] 通常就是 current_edge_target，避免重复计这条边
+                rest = ev.path[1:] if (ev.path and ev.path[0] == ev.current_edge_target) else list(ev.path)
+            else:
+                node = ev.curr_node
+                rest = list(ev.path)
+            for nxt in rest:
+                _, _, travel_h = self.get_edge_travel_profile(node, nxt)
+                t += travel_h
+                node = nxt
+            return t
+
+        try:
+            path = nx.shortest_path(
+                self.traffic_graph,
+                source=ev.curr_node,
+                target=station.traffic_node_id,
+                weight=self._travel_time_weight,
+            )
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            return 24.0
+        t = 0.0
+        for u, v in zip(path[:-1], path[1:]):
+            _, _, travel_h = self.get_edge_travel_profile(u, v)
+            t += travel_h
+        return t
+
+    def _oracle_arrival_wait_hours(self, ev, station):
+        """理想到达等待（小时）：用全局真值做多服务台 FIFO 占用模拟。
+
+        模拟 num_chargers 个服务台：当前在桩车占用台直到各自剩余充电时间释放；
+        队列中等待车与所有"比候选更早到"的在途车，按到达时间贪心占用最早空出
+        的台。返回候选 ev 到达时刻起真正要等的时间。纯真值、确定性，仅评估用。
+        """
+        eta_e = self._ev_eta_to_station_hours(ev, station)
+
+        num_servers = max(1, int(station.num_chargers))
+        server_free = [
+            max(0.0, station.estimate_charge_time_hours(c))
+            for c in station.connected_evs
+        ]
+        while len(server_free) < num_servers:
+            server_free.append(0.0)
+        server_free = server_free[:num_servers]
+        heapq.heapify(server_free)
+
+        competitors = []
+        for w in station.queue:
+            competitors.append((0.0, max(0.0, station.estimate_charge_time_hours(w))))
+        for other in self.evs:
+            if other is ev:
+                continue
+            if other.status == "MOVING_TO_CHARGE" and other.target_station_idx == station.id:
+                eta_o = self._ev_eta_to_station_hours(other, station)
+                if eta_o < eta_e:  # 只有比候选早到的才排在前面
+                    competitors.append(
+                        (eta_o, max(0.0, station.estimate_charge_time_hours(other)))
+                    )
+
+        competitors.sort(key=lambda item: item[0])
+        for arrival, service in competitors:
+            free = heapq.heappop(server_free)
+            start = max(arrival, free)
+            heapq.heappush(server_free, start + service)
+
+        earliest = heapq.heappop(server_free)
+        return max(0.0, earliest - eta_e)
+
+    def get_graph_state_for_ev_oracle(self, ev, pending_counts=None):
+        """与 get_graph_state_for_ev 相同，但把候选站点的等待估计位替换为
+        oracle 理想到达等待：feat 11 (service_time) 与 feat 15 (queue_wait_ratio)。
+
+        归一化方式与原方法一致，输入维度 / 权重 / 网络结构均不变。仅上界实验用。
+        """
+        data = self.get_graph_state_for_ev(ev, pending_counts=pending_counts)
+        for station in self.stations:
+            oracle_wait_h = self._oracle_arrival_wait_hours(ev, station)
+            charge_time_h = station.estimate_charge_time_hours(ev)
+            node_idx = station.traffic_node_id
+            data.x[node_idx, 11] = oracle_wait_h + charge_time_h
+            data.x[node_idx, 15] = min(
+                2.0, oracle_wait_h / max(1e-6, station.max_wait_time_h)
+            )
+        return data
+
+    def get_station_features_snapshot(self, data=None):
+        """Return current feature rows for all charging station nodes."""
+        if data is None:
+            data = self.get_graph_state()
+        return torch.stack(
+            [data.x[station.traffic_node_id].detach().clone() for station in self.stations],
+            dim=0,
+        )
+
+    def _on_charge_started(self, ev, station):
+        ev.charge_start_time = self.time_step * self.step_duration_h
+        ev.actual_trip_time_h = getattr(ev, "actual_trip_time_h", ev.travel_time_h)
+        ev.actual_wait_time_h = getattr(ev, "actual_wait_time_h", ev.wait_time_h)
+        ev.charge_start_lmp = getattr(station, "current_lmp", station.current_price)
+        ev.charge_start_fee = getattr(ev, "charge_start_fee", station.estimate_charge_cost(ev))
+        ev.charge_start_state = self.get_graph_state_for_ev(ev)
+        ev.charge_start_station_features = self.get_station_features_snapshot(ev.charge_start_state)
+        ev.ready_to_settle = True
+
+        self._charge_started_evs_this_step.append({
+            "ev_id": ev.id,
+            "station_id": station.id,
+            "state": ev.charge_start_state,
+            "station_features": ev.charge_start_station_features,
+            "actual_trip_time_h": float(ev.actual_trip_time_h),
+            "actual_queue_time_h": float(ev.actual_wait_time_h),
+            "charging_fee": float(ev.charge_start_fee),
+            "charge_start_lmp": float(ev.charge_start_lmp),
+            "energy_needed": float(getattr(ev, "energy_needed", 0.0) or 0.0),
+        })
 
     def get_action_mask(self, ev, pending_counts=None):
         num_actions = len(self.stations)
@@ -686,6 +855,7 @@ class TrafficPowerEnv:
         abandoned_this_step = []
         self._arrivals_this_step = []
         self._completed_evs_this_step = []
+        self._charge_started_evs_this_step = []
         self._abandoned_evs_this_step = []
         self._dispatched_t0_this_step = []
         self._abandon_real_costs = {}
@@ -725,6 +895,7 @@ class TrafficPowerEnv:
                         if len(path) > 1:
                             ev.path = path[1:]
                             ev.target_station_idx = target_id
+                            self._mark_ev_heading_to(ev, target_id)
                             ev.status = "MOVING_TO_CHARGE"
                             ev.current_edge_from = None
                             ev.current_edge_target = None
@@ -742,6 +913,7 @@ class TrafficPowerEnv:
                                 self._reset_ev_charging_attempt(ev)
                             else:
                                 ev.target_station_idx = target_id
+                                self._mark_ev_heading_to(ev, target_id)
                                 self._commit_arrival_to_waiting(ev, target_station, arrivals_this_step)
                     except Exception:
                         self._reset_ev_charging_attempt(ev)
@@ -828,7 +1000,13 @@ class TrafficPowerEnv:
                 bus_num = getattr(station, "power_bus_idx", None)
                 if bus_num is not None and bus_num in lmp_dict:
                     station_lmp = lmp_dict[bus_num]
-            load = station.step(tou_multiplier=self.tou_multiplier, price_noise=self.price_noise, step_duration_h=self.step_duration_h, lmp=station_lmp)
+            load = station.step(
+                tou_multiplier=self.tou_multiplier,
+                price_noise=self.price_noise,
+                step_duration_h=self.step_duration_h,
+                lmp=station_lmp,
+                on_charge_started=self._on_charge_started,
+            )
             grid_loads[station.power_node_id] += load
             total_realized_power += load
             for fin_ev in station.last_finished_evs:
@@ -906,6 +1084,7 @@ class TrafficPowerEnv:
             },
             "pending_t0": list(self._dispatched_t0_this_step),
             "pending_t2": list(self._arrivals_this_step),
+            "charge_started": list(self._charge_started_evs_this_step),
             "completed": list(self._completed_evs_this_step),
             "abandoned": list(self._abandoned_evs_this_step),
         }

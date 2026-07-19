@@ -19,12 +19,12 @@ import torch.nn.functional as F
 
 STATION_FEATURE_IDXS = [
     3,   # price / lmp
-    9,   # 1 / (1 + trip_time)
+    5,   # station load ratio
     10,  # trip_time
     11,  # service_time
     15,  # queue_wait_ratio
-    16,  # queue pressure
     17,  # spare chargers ratio
+    18,  # real-time mean field
 ]
 
 EV_FEATURE_IDXS = [8]  # SOC
@@ -44,8 +44,6 @@ class StationFeatureEncoder(nn.Module):
         self.ev_enc = nn.Sequential(
             nn.Linear(len(EV_FEATURE_IDXS), 8),
             nn.ReLU(),
-            nn.Linear(8, 8),
-            nn.ReLU(),
         )
         self.fusion = nn.Sequential(
             nn.Linear(out_dim + 8, out_dim),
@@ -63,7 +61,7 @@ class StationOnlyGraphQNetwork(nn.Module):
     """站点专用 Q 网络。
 
     输入:
-      - data.x: [num_nodes, 18]
+      - data.x: [num_nodes, 19]
       - data.station_node_ids: 可选, 若未提供则使用初始化时传入的 station_node_ids
 
     输出:
@@ -94,7 +92,7 @@ class StationOnlyGraphQNetwork(nn.Module):
 
         self.encoder = StationFeatureEncoder(out_dim=32)
         self.head = nn.Sequential(
-            nn.Linear(32, 32),
+            nn.Linear(64, 32),
             nn.ReLU(),
             nn.Linear(32, 1),
         )
@@ -117,6 +115,9 @@ class StationOnlyGraphQNetwork(nn.Module):
             raise ValueError("StationOnlyGraphQNetwork only supports action_type='t0'")
 
         x = data.x
+        required_dim = max(max(STATION_FEATURE_IDXS), max(EV_FEATURE_IDXS)) + 1
+        if x.shape[1] < required_dim:
+            x = F.pad(x, (0, required_dim - x.shape[1]))
         batch = self._get_batch(data, x)
         batch_size = int(batch.max().item()) + 1 if batch.numel() > 0 else 1
         if batch_size == 0:
@@ -130,15 +131,30 @@ class StationOnlyGraphQNetwork(nn.Module):
             ev_node_idx = node_offset + self._find_ev_node(x[node_offset: node_offset + self.num_nodes_per_graph])
             ev_feat = x[ev_node_idx, EV_FEATURE_IDXS].unsqueeze(0)
 
-            station_qs = []
+            station_hs = []
             for node_id in station_node_ids.tolist():
                 global_idx = node_offset + node_id
                 if global_idx >= x.shape[0]:
-                    station_qs.append(torch.tensor(-1e8, device=x.device))
+                    station_hs.append(None)
                     continue
                 station_feat = x[global_idx, STATION_FEATURE_IDXS].unsqueeze(0)
                 h = self.encoder(station_feat, ev_feat)
-                q = self.head(h).squeeze(-1)
+                station_hs.append(h.squeeze(0))
+
+            valid_hs = [h for h in station_hs if h is not None]
+            if valid_hs:
+                station_embeddings = torch.stack(valid_hs, dim=0)
+                global_ctx = station_embeddings.mean(dim=0)
+            else:
+                global_ctx = torch.zeros(32, device=x.device, dtype=x.dtype)
+
+            station_qs = []
+            for h in station_hs:
+                if h is None:
+                    station_qs.append(torch.tensor(-1e8, device=x.device))
+                    continue
+                combined = torch.cat([h, global_ctx], dim=-1)
+                q = self.head(combined).squeeze(-1)
                 station_qs.append(q.squeeze(0))
             q_values.append(torch.stack(station_qs, dim=0))
 

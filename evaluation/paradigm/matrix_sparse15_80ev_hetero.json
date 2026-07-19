@@ -1,0 +1,837 @@
+{
+  "config": {
+    "cities": [
+      {
+        "grid_variant": "old_city",
+        "ue_scale": 1.3
+      },
+      {
+        "grid_variant": "new_city",
+        "ue_scale": 1.0
+      },
+      {
+        "grid_variant": "suburb",
+        "ue_scale": 0.7
+      }
+    ],
+    "episodes": 10,
+    "steps_per_episode": 144,
+    "num_evs": 80,
+    "num_stations": 4,
+    "num_chargers_per_station": 8,
+    "epsilon": 0.0,
+    "seed": 42
+  },
+  "results": {
+    "local_old": {
+      "model": "checkpoints_sparse15_80ev_hetero_local_old_city\\model_final.pth",
+      "per_city": {
+        "old_city": {
+          "mode": "baseline",
+          "events": 6936,
+          "abandoned": 0,
+          "avg_trip_h": 0.6751238437962076,
+          "avg_queue_h": 0.6373269896193772,
+          "max_queue_h": 1.6666666666666667,
+          "var_queue_h": 0.12550484399409997,
+          "std_queue_h": 0.3542666283946316,
+          "avg_fee": 97.34327361474952,
+          "avg_reward": -3.0235269221266603,
+          "load_gini": 0.016542750290087005,
+          "load_std": 18492.860211193427,
+          "action_counts": [
+            1928,
+            1810,
+            1730,
+            1948
+          ],
+          "action_gini": 0.026024811218986033,
+          "avg_min_voltage_pu": 0.7642093381944444,
+          "avg_voltage_excursion": 2.613748470833335,
+          "avg_voltage_violations": 24.865972222222222,
+          "abandon_rate": 0.0
+        },
+        "new_city": {
+          "mode": "baseline",
+          "events": 6981,
+          "abandoned": 0,
+          "avg_trip_h": 0.606815059480066,
+          "avg_queue_h": 0.6925941842142971,
+          "max_queue_h": 1.6666666666666667,
+          "var_queue_h": 0.14529539024838267,
+          "std_queue_h": 0.3811763243544681,
+          "avg_fee": 60.81999413306764,
+          "avg_reward": -1.4230319968613474,
+          "load_gini": 0.01767042659608764,
+          "load_std": 19618.137283331696,
+          "action_counts": [
+            1948,
+            1822,
+            1724,
+            1967
+          ],
+          "action_gini": 0.028648974668274985,
+          "avg_min_voltage_pu": 0.893256943055556,
+          "avg_voltage_excursion": 0.7663107951388882,
+          "avg_voltage_violations": 20.792361111111113,
+          "abandon_rate": 0.0
+        },
+        "suburb": {
+          "mode": "baseline",
+          "events": 6996,
+          "abandoned": 0,
+          "avg_trip_h": 0.5930790792287512,
+          "avg_queue_h": 0.7032351820087707,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.14609222720005688,
+          "std_queue_h": 0.38222012924499005,
+          "avg_fee": 56.10676350284693,
+          "avg_reward": -1.4657638733501501,
+          "load_gini": 0.01743652507389637,
+          "load_std": 19489.27440897761,
+          "action_counts": [
+            1946,
+            1827,
+            1736,
+            1967
+          ],
+          "action_gini": 0.027153558052434468,
+          "avg_min_voltage_pu": 0.8676212249999999,
+          "avg_voltage_excursion": 0.934977129166665,
+          "avg_voltage_violations": 20.895833333333332,
+          "abandon_rate": 0.0
+        }
+      },
+      "average": {
+        "avg_reward": -1.9707742641127195,
+        "avg_queue_h": 0.677718785280815,
+        "avg_trip_h": 0.6250059941683416,
+        "avg_fee": 71.42334375022136,
+        "load_gini": 0.017216567320023673,
+        "action_gini": 0.02727578131323183,
+        "abandon_rate": 0.0,
+        "events": 6971.0
+      }
+    },
+    "local_new": {
+      "model": "checkpoints_sparse15_80ev_hetero_local_new_city\\model_final.pth",
+      "per_city": {
+        "old_city": {
+          "mode": "baseline",
+          "events": 7080,
+          "abandoned": 0,
+          "avg_trip_h": 0.5143466207102841,
+          "avg_queue_h": 0.7690207156308865,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.16613224878618366,
+          "std_queue_h": 0.407593239377426,
+          "avg_fee": 95.66229771635443,
+          "avg_reward": -3.5203357142379845,
+          "load_gini": 0.017970125048913044,
+          "load_std": 19508.86315753331,
+          "action_counts": [
+            2000,
+            1851,
+            1735,
+            1974
+          ],
+          "action_gini": 0.03035714285714275,
+          "avg_min_voltage_pu": 0.7640787638888895,
+          "avg_voltage_excursion": 2.6174998027777794,
+          "avg_voltage_violations": 24.864583333333332,
+          "abandon_rate": 0.0
+        },
+        "new_city": {
+          "mode": "baseline",
+          "events": 7145,
+          "abandoned": 0,
+          "avg_trip_h": 0.44053128118115736,
+          "avg_queue_h": 0.829251224632613,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.18599919829664313,
+          "std_queue_h": 0.43127624360338135,
+          "avg_fee": 59.63116515315773,
+          "avg_reward": -1.4878045393549937,
+          "load_gini": 0.018331705082572647,
+          "load_std": 20211.52270224742,
+          "action_counts": [
+            2003,
+            1859,
+            1744,
+            2019
+          ],
+          "action_gini": 0.03177049180327862,
+          "avg_min_voltage_pu": 0.8930546986111104,
+          "avg_voltage_excursion": 0.7696134458333314,
+          "avg_voltage_violations": 20.791666666666668,
+          "abandon_rate": 0.0
+        },
+        "suburb": {
+          "mode": "baseline",
+          "events": 7157,
+          "abandoned": 0,
+          "avg_trip_h": 0.4328222499859035,
+          "avg_queue_h": 0.8371291509477916,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.18884886471042828,
+          "std_queue_h": 0.43456744552535026,
+          "avg_fee": 54.81427290761663,
+          "avg_reward": -1.3875095254414698,
+          "load_gini": 0.018597973029617965,
+          "load_std": 20421.697601171494,
+          "action_counts": [
+            2013,
+            1868,
+            1735,
+            2021
+          ],
+          "action_gini": 0.03283357339269344,
+          "avg_min_voltage_pu": 0.8675598826388886,
+          "avg_voltage_excursion": 0.9367590562499988,
+          "avg_voltage_violations": 20.896527777777777,
+          "abandon_rate": 0.0
+        }
+      },
+      "average": {
+        "avg_reward": -2.1318832596781494,
+        "avg_queue_h": 0.8118003637370971,
+        "avg_trip_h": 0.46256671729244836,
+        "avg_fee": 70.0359119257096,
+        "load_gini": 0.01829993438703455,
+        "action_gini": 0.031653736017704937,
+        "abandon_rate": 0.0,
+        "events": 7127.333333333333
+      }
+    },
+    "local_sub": {
+      "model": "checkpoints_sparse15_80ev_hetero_local_suburb\\model_final.pth",
+      "per_city": {
+        "old_city": {
+          "mode": "baseline",
+          "events": 7192,
+          "abandoned": 0,
+          "avg_trip_h": 0.35880310951555844,
+          "avg_queue_h": 0.9108268446421928,
+          "max_queue_h": 2.333333333333333,
+          "var_queue_h": 0.30029187596211304,
+          "std_queue_h": 0.5479889378099827,
+          "avg_fee": 94.61485080865313,
+          "avg_reward": -4.061599348976371,
+          "load_gini": 0.02097052040740066,
+          "load_std": 23195.698761661344,
+          "action_counts": [
+            2064,
+            1869,
+            1692,
+            2047
+          ],
+          "action_gini": 0.04216631908237756,
+          "avg_min_voltage_pu": 0.7636239347222218,
+          "avg_voltage_excursion": 2.621585096527776,
+          "avg_voltage_violations": 24.860416666666666,
+          "abandon_rate": 0.0
+        },
+        "new_city": {
+          "mode": "baseline",
+          "events": 7188,
+          "abandoned": 0,
+          "avg_trip_h": 0.35593054104496935,
+          "avg_queue_h": 0.9159015025041706,
+          "max_queue_h": 2.333333333333333,
+          "var_queue_h": 0.2713428572987882,
+          "std_queue_h": 0.5209058046314978,
+          "avg_fee": 59.22222075759214,
+          "avg_reward": -1.537977148561744,
+          "load_gini": 0.02177186724252156,
+          "load_std": 24094.09893836301,
+          "action_counts": [
+            2051,
+            1855,
+            1703,
+            2059
+          ],
+          "action_gini": 0.041210224308815935,
+          "avg_min_voltage_pu": 0.8932138819444415,
+          "avg_voltage_excursion": 0.7670358576388874,
+          "avg_voltage_violations": 20.79722222222222,
+          "abandon_rate": 0.0
+        },
+        "suburb": {
+          "mode": "baseline",
+          "events": 7177,
+          "abandoned": 0,
+          "avg_trip_h": 0.3572399192469205,
+          "avg_queue_h": 0.9143328224420615,
+          "max_queue_h": 2.333333333333333,
+          "var_queue_h": 0.2829054336070912,
+          "std_queue_h": 0.5318885537470149,
+          "avg_fee": 54.39810501889497,
+          "avg_reward": -1.3634499702783913,
+          "load_gini": 0.021895490399883588,
+          "load_std": 24259.769259374738,
+          "action_counts": [
+            2049,
+            1853,
+            1693,
+            2062
+          ],
+          "action_gini": 0.04254277132036055,
+          "avg_min_voltage_pu": 0.8676251013888892,
+          "avg_voltage_excursion": 0.9346423097222214,
+          "avg_voltage_violations": 20.897222222222222,
+          "abandon_rate": 0.0
+        }
+      },
+      "average": {
+        "avg_reward": -2.321008822605502,
+        "avg_queue_h": 0.9136870565294749,
+        "avg_trip_h": 0.3573245232691494,
+        "avg_fee": 69.41172552838007,
+        "load_gini": 0.021545959349935268,
+        "action_gini": 0.041973104903851345,
+        "abandon_rate": 0.0,
+        "events": 7185.666666666667
+      }
+    },
+    "centralized": {
+      "model": "checkpoints_sparse15_80ev_hetero_centralized\\central_final.pth",
+      "per_city": {
+        "old_city": {
+          "mode": "baseline",
+          "events": 6965,
+          "abandoned": 0,
+          "avg_trip_h": 0.6755406230903531,
+          "avg_queue_h": 0.6316822206269453,
+          "max_queue_h": 1.6666666666666667,
+          "var_queue_h": 0.12231441508869725,
+          "std_queue_h": 0.3497347782087124,
+          "avg_fee": 97.40300682684953,
+          "avg_reward": -3.000529389309775,
+          "load_gini": 0.01757165261979199,
+          "load_std": 19528.30794935094,
+          "action_counts": [
+            1939,
+            1821,
+            1728,
+            1957
+          ],
+          "action_gini": 0.027031564808596364,
+          "avg_min_voltage_pu": 0.7641413152777774,
+          "avg_voltage_excursion": 2.6149014208333368,
+          "avg_voltage_violations": 24.864583333333332,
+          "abandon_rate": 0.0
+        },
+        "new_city": {
+          "mode": "baseline",
+          "events": 7165,
+          "abandoned": 0,
+          "avg_trip_h": 0.4026872280097378,
+          "avg_queue_h": 0.8651546871365454,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.2078421738698261,
+          "std_queue_h": 0.45589710886320184,
+          "avg_fee": 59.52114400653434,
+          "avg_reward": -1.5085119668457294,
+          "load_gini": 0.018860941532729214,
+          "load_std": 20949.27827596241,
+          "action_counts": [
+            2021,
+            1868,
+            1725,
+            2031
+          ],
+          "action_gini": 0.03502289077828635,
+          "avg_min_voltage_pu": 0.893009727083333,
+          "avg_voltage_excursion": 0.7700041243055551,
+          "avg_voltage_violations": 20.802777777777777,
+          "abandon_rate": 0.0
+        },
+        "suburb": {
+          "mode": "baseline",
+          "events": 7192,
+          "abandoned": 0,
+          "avg_trip_h": 0.3774904787718291,
+          "avg_queue_h": 0.8870040786058597,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.22133462845943788,
+          "std_queue_h": 0.4704621434923727,
+          "avg_fee": 54.744553668842244,
+          "avg_reward": -1.3645762001214485,
+          "load_gini": 0.018964487782061834,
+          "load_std": 21084.5793781038,
+          "action_counts": [
+            2032,
+            1874,
+            1729,
+            2037
+          ],
+          "action_gini": 0.035258081334723634,
+          "avg_min_voltage_pu": 0.8673330152777782,
+          "avg_voltage_excursion": 0.9390387381944441,
+          "avg_voltage_violations": 20.895138888888887,
+          "abandon_rate": 0.0
+        }
+      },
+      "average": {
+        "avg_reward": -1.9578725187589843,
+        "avg_queue_h": 0.7946136621231168,
+        "avg_trip_h": 0.48523944329064,
+        "avg_fee": 70.55623483407537,
+        "load_gini": 0.018465693978194347,
+        "action_gini": 0.03243751230720212,
+        "abandon_rate": 0.0,
+        "events": 7107.333333333333
+      }
+    },
+    "fedavg": {
+      "model": "checkpoints_sparse15_80ev_hetero_fedavg\\global_final.pth",
+      "per_city": {
+        "old_city": {
+          "mode": "baseline",
+          "events": 7125,
+          "abandoned": 0,
+          "avg_trip_h": 0.43934237641251095,
+          "avg_queue_h": 0.8403742690058515,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.1815917507609116,
+          "std_queue_h": 0.4261358360439915,
+          "avg_fee": 95.54138483084049,
+          "avg_reward": -3.7944677843058368,
+          "load_gini": 0.019960597565618743,
+          "load_std": 22261.909567056908,
+          "action_counts": [
+            2009,
+            1869,
+            1723,
+            2004
+          ],
+          "action_gini": 0.0326429980276135,
+          "avg_min_voltage_pu": 0.7636193861111114,
+          "avg_voltage_excursion": 2.621452308333335,
+          "avg_voltage_violations": 24.8625,
+          "abandon_rate": 0.0
+        },
+        "new_city": {
+          "mode": "baseline",
+          "events": 7163,
+          "abandoned": 0,
+          "avg_trip_h": 0.40047217107517225,
+          "avg_queue_h": 0.8720973521336497,
+          "max_queue_h": 2.0,
+          "var_queue_h": 0.1991271304235864,
+          "std_queue_h": 0.44623663052643536,
+          "avg_fee": 59.49246606455741,
+          "avg_reward": -1.5137561487983493,
+          "load_gini": 0.020943451717945427,
+          "load_std": 23145.721952772004,
+          "action_counts": [
+            2021,
+            1861,
+            1724,
+            2037
+          ],
+          "action_gini": 0.035947926206986835,
+          "avg_min_voltage_pu": 0.8931703583333332,
+          "avg_voltage_excursion": 0.7679175583333326,
+          "avg_voltage_violations": 20.802777777777777,
+          "abandon_rate": 0.0
+        },
+        "suburb": {
+          "mode": "baseline",
+          "events": 7158,
+          "abandoned": 0,
+          "avg_trip_h": 0.39162712536004296,
+          "avg_queue_h": 0.8828583403185227,
+          "max_queue_h": 2.0,
+          "var_queue_h": 0.20581075510249708,
+          "std_queue_h": 0.4536637026504292,
+          "avg_fee": 54.87873375561666,
+          "avg_reward": -1.3782893121246291,
+          "load_gini": 0.020514011316640657,
+          "load_std": 22669.556628222166,
+          "action_counts": [
+            2028,
+            1858,
+            1715,
+            2037
+          ],
+          "action_gini": 0.0371825085100812,
+          "avg_min_voltage_pu": 0.8676695104166676,
+          "avg_voltage_excursion": 0.9345363499999975,
+          "avg_voltage_violations": 20.896527777777777,
+          "abandon_rate": 0.0
+        }
+      },
+      "average": {
+        "avg_reward": -2.228837748409605,
+        "avg_queue_h": 0.8651099871526746,
+        "avg_trip_h": 0.41048055761590874,
+        "avg_fee": 69.97086155033818,
+        "load_gini": 0.02047268686673494,
+        "action_gini": 0.03525781091489385,
+        "abandon_rate": 0.0,
+        "events": 7148.666666666667
+      }
+    },
+    "fedprox": {
+      "model": "checkpoints_sparse15_80ev_hetero_fedprox\\global_final.pth",
+      "per_city": {
+        "old_city": {
+          "mode": "baseline",
+          "events": 7151,
+          "abandoned": 0,
+          "avg_trip_h": 0.42599667294486976,
+          "avg_queue_h": 0.8435183890365004,
+          "max_queue_h": 2.0,
+          "var_queue_h": 0.19541282021142278,
+          "std_queue_h": 0.4420552230337549,
+          "avg_fee": 95.21081363846555,
+          "avg_reward": -3.8031998292701186,
+          "load_gini": 0.01828754958358836,
+          "load_std": 20532.404047871143,
+          "action_counts": [
+            2010,
+            1888,
+            1728,
+            2005
+          ],
+          "action_gini": 0.03154894509238626,
+          "avg_min_voltage_pu": 0.7633945118055561,
+          "avg_voltage_excursion": 2.6261923138888914,
+          "avg_voltage_violations": 24.87847222222222,
+          "abandon_rate": 0.0
+        },
+        "new_city": {
+          "mode": "baseline",
+          "events": 7184,
+          "abandoned": 0,
+          "avg_trip_h": 0.3935933904030882,
+          "avg_queue_h": 0.8699888641425404,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.2111888516453655,
+          "std_queue_h": 0.4595528823164593,
+          "avg_fee": 59.52598164869179,
+          "avg_reward": -1.5104776602764622,
+          "load_gini": 0.018192399171141904,
+          "load_std": 20253.628600438264,
+          "action_counts": [
+            2026,
+            1890,
+            1725,
+            2023
+          ],
+          "action_gini": 0.033794363256784976,
+          "avg_min_voltage_pu": 0.892996034722222,
+          "avg_voltage_excursion": 0.7708031541666652,
+          "avg_voltage_violations": 20.790277777777778,
+          "abandon_rate": 0.0
+        },
+        "suburb": {
+          "mode": "baseline",
+          "events": 7205,
+          "abandoned": 0,
+          "avg_trip_h": 0.3875005100522353,
+          "avg_queue_h": 0.8733055748322954,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.21510358470252122,
+          "std_queue_h": 0.4637926095816116,
+          "avg_fee": 54.87135325265418,
+          "avg_reward": -1.3648629716862917,
+          "load_gini": 0.017800254565685236,
+          "load_std": 19787.764601359264,
+          "action_counts": [
+            2027,
+            1894,
+            1733,
+            2031
+          ],
+          "action_gini": 0.0334092387768381,
+          "avg_min_voltage_pu": 0.8673229673611111,
+          "avg_voltage_excursion": 0.9401868493055544,
+          "avg_voltage_violations": 20.893055555555556,
+          "abandon_rate": 0.0
+        }
+      },
+      "average": {
+        "avg_reward": -2.226180153744291,
+        "avg_queue_h": 0.8622709426704454,
+        "avg_trip_h": 0.4023635244667311,
+        "avg_fee": 69.86938284660384,
+        "load_gini": 0.018093401106805167,
+        "action_gini": 0.03291751570866978,
+        "abandon_rate": 0.0,
+        "events": 7180.0
+      }
+    },
+    "fedrep_old": {
+      "model": "checkpoints_sparse15_80ev_hetero_fedrep\\old_city_final.pth",
+      "per_city": {
+        "old_city": {
+          "mode": "baseline",
+          "events": 6913,
+          "abandoned": 0,
+          "avg_trip_h": 0.6836195294692387,
+          "avg_queue_h": 0.6343121654853163,
+          "max_queue_h": 1.6666666666666667,
+          "var_queue_h": 0.12403957743257212,
+          "std_queue_h": 0.35219252892781827,
+          "avg_fee": 97.77078892110318,
+          "avg_reward": -3.0142966742699104,
+          "load_gini": 0.017801540677277794,
+          "load_std": 19794.45004231638,
+          "action_counts": [
+            1923,
+            1801,
+            1715,
+            1954
+          ],
+          "action_gini": 0.028371432436088195,
+          "avg_min_voltage_pu": 0.7644500145833327,
+          "avg_voltage_excursion": 2.6103323013888895,
+          "avg_voltage_violations": 24.861805555555556,
+          "abandon_rate": 0.0
+        },
+        "new_city": {
+          "mode": "baseline",
+          "events": 6900,
+          "abandoned": 0,
+          "avg_trip_h": 0.6617100794202233,
+          "avg_queue_h": 0.657850241545893,
+          "max_queue_h": 1.6666666666666667,
+          "var_queue_h": 0.14035302749189005,
+          "std_queue_h": 0.3746371944853982,
+          "avg_fee": 61.04348590857034,
+          "avg_reward": -1.4089793992807853,
+          "load_gini": 0.016783958871736893,
+          "load_std": 18832.872296278994,
+          "action_counts": [
+            1915,
+            1796,
+            1719,
+            1950
+          ],
+          "action_gini": 0.027506775067750677,
+          "avg_min_voltage_pu": 0.8936288284722226,
+          "avg_voltage_excursion": 0.7611443118055538,
+          "avg_voltage_violations": 20.77638888888889,
+          "abandon_rate": 0.0
+        },
+        "suburb": {
+          "mode": "baseline",
+          "events": 6924,
+          "abandoned": 0,
+          "avg_trip_h": 0.6457859114420096,
+          "avg_queue_h": 0.6723714615829014,
+          "max_queue_h": 1.6666666666666667,
+          "var_queue_h": 0.14652291458706368,
+          "std_queue_h": 0.3827831169044211,
+          "avg_fee": 56.2718194406207,
+          "avg_reward": -1.5025237712251565,
+          "load_gini": 0.01715286965482954,
+          "load_std": 19192.76098985426,
+          "action_counts": [
+            1919,
+            1812,
+            1716,
+            1957
+          ],
+          "action_gini": 0.02802539168017293,
+          "avg_min_voltage_pu": 0.8681321576388896,
+          "avg_voltage_excursion": 0.9285651645833319,
+          "avg_voltage_violations": 20.886805555555554,
+          "abandon_rate": 0.0
+        }
+      },
+      "average": {
+        "avg_reward": -1.9752666149252842,
+        "avg_queue_h": 0.6548446228713702,
+        "avg_trip_h": 0.6637051734438238,
+        "avg_fee": 71.69536475676473,
+        "load_gini": 0.017246123067948076,
+        "action_gini": 0.0279678663946706,
+        "abandon_rate": 0.0,
+        "events": 6912.333333333333
+      }
+    },
+    "fedrep_new": {
+      "model": "checkpoints_sparse15_80ev_hetero_fedrep\\new_city_final.pth",
+      "per_city": {
+        "old_city": {
+          "mode": "baseline",
+          "events": 7094,
+          "abandoned": 0,
+          "avg_trip_h": 0.5001960249011668,
+          "avg_queue_h": 0.7782163330514043,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.18333244488312261,
+          "std_queue_h": 0.4281733818012542,
+          "avg_fee": 95.95111015914043,
+          "avg_reward": -3.5552068746690386,
+          "load_gini": 0.01746525628020512,
+          "load_std": 19200.21469549354,
+          "action_counts": [
+            1992,
+            1851,
+            1734,
+            1997
+          ],
+          "action_gini": 0.030697121732241817,
+          "avg_min_voltage_pu": 0.7638218868055552,
+          "avg_voltage_excursion": 2.6202454604166596,
+          "avg_voltage_violations": 24.869444444444444,
+          "abandon_rate": 0.0
+        },
+        "new_city": {
+          "mode": "baseline",
+          "events": 7166,
+          "abandoned": 0,
+          "avg_trip_h": 0.45041513668504274,
+          "avg_queue_h": 0.817773746395013,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.1852751566736047,
+          "std_queue_h": 0.4304360076406302,
+          "avg_fee": 59.505840668514516,
+          "avg_reward": -1.4788838739054642,
+          "load_gini": 0.018013407016195027,
+          "load_std": 19945.30916776747,
+          "action_counts": [
+            2011,
+            1862,
+            1743,
+            2030
+          ],
+          "action_gini": 0.03302380329584098,
+          "avg_min_voltage_pu": 0.8930411951388877,
+          "avg_voltage_excursion": 0.7698614083333325,
+          "avg_voltage_violations": 20.803472222222222,
+          "abandon_rate": 0.0
+        },
+        "suburb": {
+          "mode": "baseline",
+          "events": 7152,
+          "abandoned": 0,
+          "avg_trip_h": 0.441762486422856,
+          "avg_queue_h": 0.8269947800149152,
+          "max_queue_h": 1.8333333333333335,
+          "var_queue_h": 0.1879880355183644,
+          "std_queue_h": 0.4335758705444347,
+          "avg_fee": 54.935241043984576,
+          "avg_reward": -1.389636531206992,
+          "load_gini": 0.0191934739521038,
+          "load_std": 21255.583287534726,
+          "action_counts": [
+            2017,
+            1867,
+            1731,
+            2017
+          ],
+          "action_gini": 0.03301886792452824,
+          "avg_min_voltage_pu": 0.8675456194444462,
+          "avg_voltage_excursion": 0.9366809645833328,
+          "avg_voltage_violations": 20.895833333333332,
+          "abandon_rate": 0.0
+        }
+      },
+      "average": {
+        "avg_reward": -2.141242426593832,
+        "avg_queue_h": 0.8076616198204442,
+        "avg_trip_h": 0.4641245493363552,
+        "avg_fee": 70.13073062387984,
+        "load_gini": 0.018224045749501316,
+        "action_gini": 0.032246597650870346,
+        "abandon_rate": 0.0,
+        "events": 7137.333333333333
+      }
+    },
+    "fedrep_suburb": {
+      "model": "checkpoints_sparse15_80ev_hetero_fedrep\\suburb_final.pth",
+      "per_city": {
+        "old_city": {
+          "mode": "baseline",
+          "events": 7175,
+          "abandoned": 0,
+          "avg_trip_h": 0.36292205900680274,
+          "avg_queue_h": 0.9069686411149827,
+          "max_queue_h": 2.333333333333333,
+          "var_queue_h": 0.2675085421834866,
+          "std_queue_h": 0.5172122796139769,
+          "avg_fee": 94.4155282724853,
+          "avg_reward": -4.046317899044833,
+          "load_gini": 0.021031319823310968,
+          "load_std": 23355.682018138763,
+          "action_counts": [
+            2041,
+            1872,
+            1701,
+            2041
+          ],
+          "action_gini": 0.03883082952318739,
+          "avg_min_voltage_pu": 0.7637018090277766,
+          "avg_voltage_excursion": 2.620629019444447,
+          "avg_voltage_violations": 24.86875,
+          "abandon_rate": 0.0
+        },
+        "new_city": {
+          "mode": "baseline",
+          "events": 7188,
+          "abandoned": 0,
+          "avg_trip_h": 0.357744593074898,
+          "avg_queue_h": 0.9124930439621566,
+          "max_queue_h": 2.333333333333333,
+          "var_queue_h": 0.2828266728787102,
+          "std_queue_h": 0.5318145098422101,
+          "avg_fee": 59.33665461517398,
+          "avg_reward": -1.5366712011494776,
+          "load_gini": 0.021915638352208555,
+          "load_std": 24425.129384440937,
+          "action_counts": [
+            2050,
+            1867,
+            1689,
+            2062
+          ],
+          "action_gini": 0.04244913928012517,
+          "avg_min_voltage_pu": 0.893101287500001,
+          "avg_voltage_excursion": 0.7682289888888886,
+          "avg_voltage_violations": 20.8,
+          "abandon_rate": 0.0
+        },
+        "suburb": {
+          "mode": "baseline",
+          "events": 7194,
+          "abandoned": 0,
+          "avg_trip_h": 0.3549376644608466,
+          "avg_queue_h": 0.913284218330089,
+          "max_queue_h": 2.1666666666666665,
+          "var_queue_h": 0.2816140648659934,
+          "std_queue_h": 0.5306732185309462,
+          "avg_fee": 54.573010367735186,
+          "avg_reward": -1.3601497757216618,
+          "load_gini": 0.022486378979538202,
+          "load_std": 24976.99787414389,
+          "action_counts": [
+            2048,
+            1863,
+            1698,
+            2065
+          ],
+          "action_gini": 0.041894709408391906,
+          "avg_min_voltage_pu": 0.8675289138888908,
+          "avg_voltage_excursion": 0.935903765972222,
+          "avg_voltage_violations": 20.895833333333332,
+          "abandon_rate": 0.0
+        }
+      },
+      "average": {
+        "avg_reward": -2.314379625305324,
+        "avg_queue_h": 0.9109153011357427,
+        "avg_trip_h": 0.3585347721808491,
+        "avg_fee": 69.44173108513148,
+        "load_gini": 0.021811112385019243,
+        "action_gini": 0.04105822607056816,
+        "abandon_rate": 0.0,
+        "events": 7185.666666666667
+      }
+    }
+  }
+}

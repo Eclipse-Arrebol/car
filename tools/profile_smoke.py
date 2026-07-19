@@ -27,7 +27,13 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 from env.real_env import RealTrafficEnv
 from env import power_grid_pp
 from train import DQNAgent
-from trainer.trainer import HindsightTrainer
+from trainer.trainer import (
+    HindsightTrainer,
+    NORM_FEE,
+    NORM_QUEUE,
+    NORM_TRIP,
+    compute_hindsight_reward,
+)
 import pandapower as pp
 
 
@@ -88,17 +94,17 @@ _orig_step = RealTrafficEnv.step
 
 def _patched_step(self, actions):
     obs, reward, done, info = _orig_step(self, actions)
-    for entry in info.get("completed", []):
+    for entry in info.get("charge_started", []):
         trip = entry.get("actual_trip_time_h", 0.0)
         queue = entry.get("actual_queue_time_h", 0.0)
         fee = entry.get("charging_fee", 0.0)
         # 镜像 trainer 的 reward 公式 (v3 § 二锁定)
-        reward_estimate = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
+        reward_estimate = compute_hindsight_reward(trip, queue, fee)
         _completed_log.append({
             "trip": trip, "queue": queue, "fee": fee,
-            "trip_term": 0.3 * trip,
-            "queue_term": 0.5 * queue,
-            "fee_term": 0.03 * fee,
+            "trip_term": 0.4 * (trip / NORM_TRIP),
+            "queue_term": 0.4 * (queue / NORM_QUEUE),
+            "fee_term": 0.2 * (fee / NORM_FEE),
             "reward": reward_estimate,
         })
     return obs, reward, done, info

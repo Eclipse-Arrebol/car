@@ -21,12 +21,14 @@ class ChargingStation:
 
         self.base_price = 1.0
         self.current_price = 1.0
+        self.current_lmp = 1.0
         self.service_price_markup = 0.15
         self.price_noise = 0.0
 
         self.last_power_allocation = {}
         self.last_total_load = 0.0
         self.last_billing_price = self.current_price
+        self.last_started_evs = []
         self.predicted_arrivals = 0.0
         self.last_finished_evs = []
         self.arrival_ema_alpha = 0.3
@@ -36,13 +38,14 @@ class ChargingStation:
         congestion = len(self.queue) + len(self.connected_evs)
         self.price_noise = float(price_noise)
         if lmp is not None:
-            energy_price = lmp * (1.0 + self.price_noise)
+            energy_price = float(lmp) * (1.0 + self.price_noise)
         else:
             energy_price = self.base_price * tou_multiplier * (1.0 + self.price_noise)
+        self.current_lmp = max(0.1, energy_price)
         congestion_markup = 0.08 * congestion
         self.current_price = max(
             0.1,
-            energy_price + self.service_price_markup + congestion_markup,
+            self.current_lmp + self.service_price_markup + congestion_markup,
         )
         return self.current_price
 
@@ -175,16 +178,37 @@ class ChargingStation:
                 return random.choice(valid)
         return ev.curr_node
 
-    def step(self, tou_multiplier=1.0, price_noise=0.0, step_duration_h=1.0, lmp=None):
+    def _charge_start_fee(self, ev):
+        remaining_energy = max(
+            0.0,
+            (ev.target_soc - ev.soc) / 100.0 * ev.battery_capacity_kwh
+        )
+        billed_energy = remaining_energy / max(1e-6, ev.charge_efficiency)
+        return self.current_lmp * billed_energy, billed_energy
+
+    def step(self, tou_multiplier=1.0, price_noise=0.0, step_duration_h=1.0,
+             lmp=None, on_charge_started=None):
         realized_power = 0.0
+        self.last_started_evs = []
+        self.update_price(tou_multiplier, price_noise=price_noise, lmp=lmp)
 
         while self.queue and len(self.connected_evs) < self.num_chargers:
             ev = self.queue.pop(0)
             ev.status = "CHARGING"
             ev.charge_started_count += 1
+            ev.ready_to_settle = True
+            ev.actual_trip_time_h = ev.travel_time_h
+            ev.actual_wait_time_h = ev.wait_time_h
+            ev.charge_start_lmp = self.current_lmp
+            ev.charge_start_fee, ev.energy_needed = self._charge_start_fee(ev)
+            ev.charge_start_station_id = self.id
             self.connected_evs.append(ev)
+            self.last_started_evs.append(ev)
 
         allocation = self.optimize_power()
+        if on_charge_started is not None:
+            for ev in self.last_started_evs:
+                on_charge_started(ev, self)
 
         self.last_billing_price = self.current_price
         finished = []
@@ -229,5 +253,4 @@ class ChargingStation:
         for ev in finished:
             self.connected_evs.remove(ev)
 
-        self.update_price(tou_multiplier, price_noise=price_noise, lmp=lmp)
         return realized_power

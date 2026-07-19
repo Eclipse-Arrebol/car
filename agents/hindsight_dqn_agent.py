@@ -18,12 +18,15 @@ class HindsightDQNAgent(DQNBase):
     def __init__(self, num_features, num_actions,
                  station_node_ids=None, num_nodes_per_graph=9,
                  network_variant="station_only",
-                 use_action_mask=True):
+                 use_action_mask=True,
+                 epsilon_decay=0.994, epsilon_min=0.05):
         super().__init__(
             num_features, num_actions,
             station_node_ids=station_node_ids,
             num_nodes_per_graph=num_nodes_per_graph,
             memory_size=50000,
+            epsilon_decay=epsilon_decay,
+            epsilon_min=epsilon_min,
             network_variant=network_variant,
             use_action_mask=use_action_mask,
         )

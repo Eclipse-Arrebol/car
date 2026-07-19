@@ -1,0 +1,140 @@
+{
+  "config": {
+    "model": "checkpoints_fed_hindsight_40ev\\global_final.pth",
+    "episodes": 10,
+    "steps_per_episode": 144,
+    "num_evs": 40,
+    "num_stations": 4,
+    "num_chargers_per_station": 8,
+    "grid_variant": "old_city",
+    "ue_scale": 1.3,
+    "epsilon": 0.0,
+    "seed": 42
+  },
+  "A": {
+    "mode": "A",
+    "events": 5567,
+    "abandoned": 0,
+    "abandon_rate": 0.0,
+    "avg_trip_h": 0.3590269293838036,
+    "avg_queue_h": 0.07733069876055348,
+    "max_queue_h": 0.9999999999999999,
+    "var_queue_h": 0.021677987498798377,
+    "std_queue_h": 0.14723446437162183,
+    "avg_fee": 91.0800283372195,
+    "avg_reward": -0.7098056052419283,
+    "load_gini": 0.1176403125663199,
+    "action_gini": 0.12723449001051534,
+    "action_counts": [
+      1765,
+      1336,
+      915,
+      1690
+    ],
+    "avg_min_voltage_pu": 0.7880730319444448,
+    "avg_voltage_excursion": 2.29004743333333,
+    "avg_voltage_violations": 24.22361111111111
+  },
+  "B": {
+    "mode": "B",
+    "events": 5567,
+    "abandoned": 0,
+    "abandon_rate": 0.0,
+    "avg_trip_h": 0.3590269293838036,
+    "avg_queue_h": 0.07733069876055348,
+    "max_queue_h": 0.9999999999999999,
+    "var_queue_h": 0.021677987498798377,
+    "std_queue_h": 0.14723446437162183,
+    "avg_fee": 91.0800283372195,
+    "avg_reward": -0.7098056052419283,
+    "load_gini": 0.1176403125663199,
+    "action_gini": 0.12723449001051534,
+    "action_counts": [
+      1765,
+      1336,
+      915,
+      1690
+    ],
+    "avg_min_voltage_pu": 0.7880730319444448,
+    "avg_voltage_excursion": 2.29004743333333,
+    "avg_voltage_violations": 24.22361111111111
+  },
+  "C": {
+    "mode": "C",
+    "events": 5614,
+    "abandoned": 0,
+    "abandon_rate": 0.0,
+    "avg_trip_h": 0.3556027672135808,
+    "avg_queue_h": 0.07312076950480964,
+    "max_queue_h": 0.8333333333333333,
+    "var_queue_h": 0.019635540455696626,
+    "std_queue_h": 0.14012687271075674,
+    "avg_fee": 90.93671357100544,
+    "avg_reward": -0.6970974296827597,
+    "load_gini": 0.11237443330733998,
+    "action_gini": 0.12078846821813127,
+    "action_counts": [
+      1763,
+      1345,
+      953,
+      1697
+    ],
+    "avg_min_voltage_pu": 0.7874923979166665,
+    "avg_voltage_excursion": 2.297921978472224,
+    "avg_voltage_violations": 24.269444444444446
+  },
+  "improvement_pct": {
+    "avg_queue_h": {
+      "C_vs_A": 5.444059504465949,
+      "C_vs_B": 5.444059504465949
+    },
+    "var_queue_h": {
+      "C_vs_A": 9.421755793589993,
+      "C_vs_B": 9.421755793589993
+    },
+    "std_queue_h": {
+      "C_vs_A": 4.827396690849108,
+      "C_vs_B": 4.827396690849108
+    },
+    "max_queue_h": {
+      "C_vs_A": 16.666666666666664,
+      "C_vs_B": 16.666666666666664
+    },
+    "avg_reward": {
+      "C_vs_A": 1.7903740778205275,
+      "C_vs_B": 1.7903740778205275
+    },
+    "avg_trip_h": {
+      "C_vs_A": 0.9537340767445116,
+      "C_vs_B": 0.9537340767445116
+    },
+    "avg_fee": {
+      "C_vs_A": 0.15735037508271857,
+      "C_vs_B": 0.15735037508271857
+    },
+    "abandon_rate": {
+      "C_vs_A": null,
+      "C_vs_B": null
+    },
+    "load_gini": {
+      "C_vs_A": 4.476254052802924,
+      "C_vs_B": 4.476254052802924
+    },
+    "action_gini": {
+      "C_vs_A": 5.0662534913696256,
+      "C_vs_B": 5.0662534913696256
+    },
+    "avg_min_voltage_pu": {
+      "C_vs_A": -0.0736776928333256,
+      "C_vs_B": -0.0736776928333256
+    },
+    "avg_voltage_excursion": {
+      "C_vs_A": -0.3438594775057462,
+      "C_vs_B": -0.3438594775057462
+    },
+    "avg_voltage_violations": {
+      "C_vs_A": -0.18920933432716405,
+      "C_vs_B": -0.18920933432716405
+    }
+  }
+}

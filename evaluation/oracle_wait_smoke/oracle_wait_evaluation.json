@@ -1,0 +1,79 @@
+{
+  "config": {
+    "model": "checkpoints_fed_hindsight_40ev\\global_final.pth",
+    "episodes": 2,
+    "steps_per_episode": 12,
+    "num_evs": 40,
+    "num_stations": 4,
+    "num_chargers_per_station": 8,
+    "grid_variant": "old_city",
+    "ue_scale": 1.3,
+    "use_action_mask": false,
+    "epsilon": 0.0,
+    "seed": 42
+  },
+  "baseline": {
+    "mode": "baseline",
+    "events": 56,
+    "abandoned": 0,
+    "avg_trip_h": 0.30678336866593575,
+    "avg_queue_h": 0.0,
+    "max_queue_h": 0.0,
+    "var_queue_h": 0.0,
+    "std_queue_h": 0.0,
+    "avg_fee": 78.35600278490865,
+    "avg_reward": -0.4526701301953246,
+    "load_gini": 0.2570792332922307,
+    "load_std": 1530.9128861164759,
+    "action_counts": [
+      26,
+      9,
+      11,
+      22
+    ],
+    "action_gini": 0.2279411764705883,
+    "avg_min_voltage_pu": 0.8339692500000001,
+    "avg_voltage_excursion": 1.6964156249999993,
+    "avg_voltage_violations": 22.375
+  },
+  "oracle": {
+    "mode": "oracle",
+    "events": 56,
+    "abandoned": 0,
+    "avg_trip_h": 0.3046610734345859,
+    "avg_queue_h": 0.0,
+    "max_queue_h": 0.0,
+    "var_queue_h": 0.0,
+    "std_queue_h": 0.0,
+    "avg_fee": 78.0406850231392,
+    "avg_reward": -0.450236269813883,
+    "load_gini": 0.261733476188851,
+    "load_std": 1563.2988390803948,
+    "action_counts": [
+      27,
+      9,
+      10,
+      22
+    ],
+    "action_gini": 0.24264705882352944,
+    "avg_min_voltage_pu": 0.8340617916666667,
+    "avg_voltage_excursion": 1.6954489583333325,
+    "avg_voltage_violations": 22.375
+  },
+  "improvement_pct": {
+    "avg_queue_h": null,
+    "max_queue_h": null,
+    "std_queue_h": null,
+    "var_queue_h": null,
+    "avg_trip_h": 0.6917895323265864,
+    "avg_fee": 0.4024168545644339,
+    "avg_reward": 0.5376675462088505,
+    "abandoned": null,
+    "load_gini": -1.8104312966149516,
+    "load_std": -2.1154667425965443,
+    "action_gini": -6.451612903225781,
+    "avg_min_voltage_pu": 0.011096532236244003,
+    "avg_voltage_excursion": 0.0569828910097891,
+    "avg_voltage_violations": -0.0
+  }
+}

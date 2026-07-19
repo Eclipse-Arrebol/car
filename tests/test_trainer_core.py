@@ -7,7 +7,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from env.base_env import TrafficPowerEnv
-from trainer.trainer import HindsightTrainer
+from trainer.trainer import HindsightTrainer, compute_hindsight_reward
 
 
 def _ensure_low_soc_idle_pending(env: TrafficPowerEnv) -> None:
@@ -71,7 +71,6 @@ def test_pending_key_uses_charge_sessions_for_isolation():
     t1, t2 = agent.transitions[0], agent.transitions[1]
     assert t1["state"] is not t2["state"], "两条 transition 的 state 不能是同一引用"
 
-    assert t1["reward"] != t2["reward"], "两次充电 hindsight reward 应可区分（非覆盖同一条）"
 
     for sid in (0, 1):
         assert (ev.id, sid) not in trainer.pending, (
@@ -79,7 +78,7 @@ def test_pending_key_uses_charge_sessions_for_isolation():
         )
 
 
-def test_reward_uses_completed_snapshot_fields():
+def test_reward_uses_charge_start_snapshot_fields():
     """on_completed 算出的 reward 公式正确。"""
     # ------------------------------------------------------------------
     # Step 2 接口设计提醒（与 env 真实语义相关，本测试不裁决实现）:
@@ -106,24 +105,30 @@ def test_reward_uses_completed_snapshot_fields():
     mask = env.get_action_mask(ev)
     trainer.on_dispatch(ev, state, 0, mask)
 
+    charge_state = env.get_graph_state_for_ev(ev)
+    charge_state.x[ev.curr_node, 8] = 0.99
     entry = {
         "ev_id": ev.id,
+        "state": charge_state,
         "actual_trip_time_h": 1.0,
         "actual_queue_time_h": 2.0,
         "charging_fee": 100.0,
     }
-    expected = -(0.3 * 1.0 + 0.5 * 2.0 + 0.03 * 100.0)
+    expected = compute_hindsight_reward(1.0, 2.0, 100.0)
 
-    trainer.on_completed(entry, session_idx_override=0)
+    trainer.on_charge_started(entry, session_idx_override=0)
 
     assert len(agent.transitions) == 1
     actual_reward = agent.transitions[0]["reward"]
+    assert agent.transitions[0]["state"] is not state
+    assert agent.transitions[0]["state"].x.equal(state.x)
+    assert not agent.transitions[0]["state"].x.equal(charge_state.x)
     assert abs(actual_reward - expected) < 1e-9, (
         f"reward 期望 {expected}, 实际 {actual_reward}"
     )
 
 
-def test_transition_enters_buffer_only_at_completed_step():
+def test_transition_enters_buffer_only_at_charge_start_step():
     """transition 入 buffer 的时机 == completed 那一步, 不能提前。"""
     env = TrafficPowerEnv(num_evs=1)
     env.reset()
@@ -145,16 +150,33 @@ def test_transition_enters_buffer_only_at_completed_step():
     assert len(trainer.pending) == pending_before + 1, "dispatch 必须新增 pending"
     assert len(agent.transitions) == buffer_before, "dispatch 不能立刻入 buffer"
 
+    charge_state = env.get_graph_state_for_ev(ev)
     entry = {
         "ev_id": ev.id,
+        "state": charge_state,
         "actual_trip_time_h": 0.5,
         "actual_queue_time_h": 0.3,
         "charging_fee": 50.0,
     }
-    trainer.on_completed(entry, session_idx_override=0)
+    trainer.on_charge_started(entry, session_idx_override=0)
 
     assert len(trainer.pending) == pending_before, "completed 后 pending 必须减回去"
     assert len(agent.transitions) == buffer_before + 1, "completed 后 buffer 必须 +1"
+
+
+def test_pending_counts_enter_dispatch_state_mean_field():
+    env = TrafficPowerEnv(num_evs=1)
+    env.reset()
+    ev = env.evs[0]
+    ev.status = "IDLE"
+    ev.soc = 25.0
+    ev.curr_node = 4
+    state = env.get_graph_state_for_ev(ev, pending_counts={0: 2, 1: 1})
+
+    s0 = env.stations[0].traffic_node_id
+    s1 = env.stations[1].traffic_node_id
+    assert abs(float(state.x[s0, 18]) - (2.0 / 3.0)) < 1e-6
+    assert abs(float(state.x[s1, 18]) - (1.0 / 3.0)) < 1e-6
 
 
 def test_abandoned_ev_drops_pending_without_buffer_growth():

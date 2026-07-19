@@ -31,6 +31,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 
 from agents.hindsight_dqn_agent import HindsightDQNAgent
 from env.real_env import RealTrafficEnv
+from trainer.trainer import compute_hindsight_reward
 from train_hindsight import (
     TRAIN_DEFAULT_NUM_CHARGERS_PER_STATION,
     TRAIN_DEFAULT_NUM_EVS,
@@ -74,7 +75,7 @@ def parse_args():
         "--network",
         type=str,
         default="station_only",
-        choices=["original", "lightweight", "station_only"],
+        choices=["original", "lightweight", "station_only", "station_attn"],
         help="Network variant used when loading the checkpoint.",
     )
     p.add_argument("--use-action-mask", dest="use_action_mask", action="store_true", default=True)
@@ -177,7 +178,7 @@ def _run_policy(args, policy_name, policy_fn):
             _obs, _reward, done, info = env.step(actions)
             steps_run += 1
 
-            for entry in info.get("completed", []):
+            for entry in info.get("charge_started", []):
                 ev_id = entry.get("ev_id")
                 action = None
                 # completed entries don’t carry action; infer from current env records if possible
@@ -188,7 +189,7 @@ def _run_policy(args, policy_name, policy_fn):
                 trip = float(entry.get("actual_trip_time_h", 0.0))
                 queue = float(entry.get("actual_queue_time_h", 0.0))
                 fee = float(entry.get("charging_fee", 0.0))
-                reward = -(0.3 * trip + 0.5 * queue + 0.03 * fee)
+                reward = compute_hindsight_reward(trip, queue, fee)
                 ep_trip.append(trip)
                 ep_queue.append(queue)
                 ep_fee.append(fee)
